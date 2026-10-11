@@ -222,9 +222,9 @@ export function createStepExtension(options: StepExtensionOptions = {}): Extensi
 				nativeRetryOverridden = false;
 			}
 			if (autoResume) {
-				if (!nativeRetryOverridden && ctx.autoRetryEnabled !== true) {
-					nativeRetryOverridden = true;
-				}
+				// Do not persist an unchanged default just because a session started.
+				if (ctx.autoRetryEnabled === true) return;
+				nativeRetryOverridden = true;
 				try {
 					ctx.setAutoRetryEnabled(true);
 				} catch {
