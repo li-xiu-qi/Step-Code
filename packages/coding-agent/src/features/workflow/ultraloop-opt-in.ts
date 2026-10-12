@@ -63,9 +63,12 @@ export function detectUltraloopBudget(prompt: string): number | undefined {
 	return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-export function buildUltraloopReminder(token: string): string {
+export function buildUltraloopReminder(token: string, workflowAvailable = true): string {
 	const lower = token.toLowerCase();
 	const signal = lower === "ultraloop" || lower === "ultracode" ? `the keyword "${lower}"` : `the phrase "${token}"`;
+	if (!workflowAvailable) {
+		return `<system-reminder>The user included ${signal}, requesting multi-agent orchestration for this turn. The workflow tool is not active in the current tool profile. Explain this limitation instead of attempting to call it; the session switch and find_tools do not expand tool access.</system-reminder>`;
+	}
 	return `<system-reminder>The user included ${signal}, opting this turn into multi-agent orchestration — use the workflow tool to fulfill the request.</system-reminder>`;
 }
 
@@ -101,15 +104,14 @@ function lastSessionMode(records: readonly ReminderRecord[]): boolean | undefine
 	return undefined;
 }
 
-function sessionModeReminder(sessionMode: boolean, previous: boolean | undefined, activeTools: readonly string[]) {
+function sessionModeReminder(sessionMode: boolean, previous: boolean | undefined) {
 	if (sessionMode ? previous === true : previous !== true) return undefined;
 	const content = sessionMode ? buildUltraloopSessionReminder() : buildUltraloopSessionOffReminder();
 	return {
 		customType: "ultraloop-opt-in",
-		content:
-			sessionMode && !activeTools.includes("workflow")
-				? `${content}\nThe workflow tool is not active in the current tool profile. The session switch does not change tool access.`
-				: content,
+		// Standing consent can outlive a tool-profile change. State the constraint
+		// conditionally rather than persisting a snapshot of tool availability.
+		content: `${content}\nIf the workflow tool is not active in the current tool profile, explain the limitation instead of attempting to call it. Consult the current active tools; session mode does not expand tool access.`,
 		display: false,
 		details: { source: "session", sessionMode },
 	};
@@ -167,7 +169,7 @@ export function createUltraloopOptInExtension(options: UltraloopOptInExtensionOp
 			const previous = lastSessionMode(
 				ctx.sessionManager.buildContextEntries().filter((entry) => entry.type === "custom_message"),
 			);
-			const modeReminder = sessionModeReminder(sessionMode, previous, pi.getActiveTools());
+			const modeReminder = sessionModeReminder(sessionMode, previous);
 
 			// Session-standing wins when both signals fire: the LLM already knows
 			// workflow is authorized for the whole session; a per-turn reminder
@@ -176,7 +178,9 @@ export function createUltraloopOptInExtension(options: UltraloopOptInExtensionOp
 			return {
 				message: {
 					customType: "ultraloop-opt-in",
-					content: [modeReminder?.content, buildUltraloopReminder(token)].filter(Boolean).join("\n\n"),
+					content: [modeReminder?.content, buildUltraloopReminder(token, pi.getActiveTools().includes("workflow"))]
+						.filter(Boolean)
+						.join("\n\n"),
 					display: false,
 					details: { source: "turn", token, ...(modeReminder ? { sessionMode: false } : {}) },
 				},
@@ -189,7 +193,7 @@ export function createUltraloopOptInExtension(options: UltraloopOptInExtensionOp
 		// is request-local: it does not append duplicate entries to session history.
 		pi.on("context", (event) => {
 			const previous = lastSessionMode(event.messages.filter((message) => message.role === "custom"));
-			const message = sessionModeReminder(sessionMode, previous, pi.getActiveTools());
+			const message = sessionModeReminder(sessionMode, previous);
 			if (!message) return;
 			return { messages: [...event.messages, { role: "custom" as const, ...message, timestamp: Date.now() }] };
 		});

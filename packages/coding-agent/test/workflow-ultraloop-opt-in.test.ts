@@ -560,15 +560,15 @@ describe("Ultracode discovery and command aliases", () => {
 		expect(h.entries.at(-1)?.data).toEqual({ offConsentCall: true, toolCallId: "unapproved" });
 	});
 
-	test("describes active or unavailable tools accurately", () => {
+	test("keeps standing consent independent of tool availability", () => {
 		const h = harness();
 		install(h);
 		h.activeTools.splice(0, h.activeTools.length, "workflow");
 		void h.commands.get("ultracode")!.handler("on", makeCtx(h.notifications, h.statuses));
-		expect(startOrdinaryTurn(h)?.message?.content).toContain("workflow");
-		expect(startOrdinaryTurn(h)?.message?.content).not.toContain("not active");
+		const content = startOrdinaryTurn(h)?.message?.content;
+		expect(content).toContain("If the workflow tool is not active");
 		h.activeTools.length = 0;
-		expect(startOrdinaryTurn(h)?.message?.content).toContain("not active");
+		expect(startOrdinaryTurn(h)?.message?.content).toBe(content);
 		expect(h.activeTools).toEqual([]);
 	});
 

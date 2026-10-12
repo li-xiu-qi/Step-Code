@@ -79,7 +79,7 @@ describe("Ultracode entry through a real session", () => {
 		expect(harness.eventsOfType("tool_execution_start")).toEqual([]);
 	});
 
-	it("does not tell a restricted profile that tool search activates workflow", async () => {
+	it.each(["session", "turn"])("explains unavailable workflow for a restricted profile (%s opt-in)", async (scope) => {
 		const harness = await createHarness({
 			tools: [
 				{
@@ -96,15 +96,46 @@ describe("Ultracode entry through a real session", () => {
 		harnesses.push(harness);
 		await harness.session.bindExtensions({});
 		harness.setResponses([fauxAssistantMessage("Tool access is limited")]);
-		await harness.session.prompt("/ultracode on");
-		await harness.session.prompt("Explain the available modes");
+		if (scope === "session") await harness.session.prompt("/ultracode on");
+		await harness.session.prompt(scope === "session" ? "Explain the available modes" : "ultracode: review this task");
 
 		expect(harness.session.getActiveToolNames()).toEqual(["find_tools"]);
 		expect(harness.session.getAllTools().some((tool) => tool.name === "workflow")).toBe(false);
 		expect(latestModeNotice(harness)).toContain("not active");
 		expect(latestModeNotice(harness)).toContain("tool profile");
 		expect(latestModeNotice(harness)).not.toContain("To load the workflow tool");
+		expect(latestModeNotice(harness)).toContain("instead of attempting to call it");
+		if (scope === "turn")
+			expect(latestModeNotice(harness)).not.toContain("use the workflow tool to fulfill the request");
 		expect(harness.eventsOfType("tool_execution_start")).toEqual([]);
+	});
+
+	it("keeps standing consent independent of changes to the active tool profile", async () => {
+		const harness = await createHarness({ tools: [], extensionFactories: [workflowCapabilities] });
+		harnesses.push(harness);
+		await harness.session.bindExtensions({});
+		const requests: Array<{ tools: string[]; notices: string[] }> = [];
+		harness.setResponses(
+			Array.from({ length: 3 }, () => (context) => {
+				requests.push({
+					tools: context.tools?.map((tool) => tool.name) ?? [],
+					notices: context.messages.map(getMessageText).filter((text) => text.startsWith("<system-reminder>")),
+				});
+				return fauxAssistantMessage("OK");
+			}),
+		);
+		harness.session.setActiveToolsByName([]);
+		await harness.session.prompt("/ultracode on");
+		await harness.session.prompt("First task");
+		harness.session.setActiveToolsByName(["workflow"]);
+		await harness.session.prompt("Second task");
+		harness.session.setActiveToolsByName([]);
+		await harness.session.prompt("Third task");
+		expect(requests.map((request) => request.tools.includes("workflow"))).toEqual([false, true, false]);
+		expect(requests.map((request) => request.notices.length)).toEqual([1, 1, 1]);
+		expect(requests[0]!.notices[0]).toContain("If the workflow tool is not active");
+		expect(requests[1]!.notices).toEqual(requests[0]!.notices);
+		expect(requests[2]!.notices).toEqual(requests[0]!.notices);
 	});
 
 	it("keeps the normal system-prompt refresh when active tools change", async () => {
@@ -126,6 +157,8 @@ describe("Ultracode entry through a real session", () => {
 		await harness.session.bindExtensions({});
 		harness.setResponses([fauxAssistantMessage("OK"), fauxAssistantMessage("OK"), fauxAssistantMessage("OK")]);
 		await harness.session.prompt("ultracode: review this task");
+		expect(latestModeNotice(harness)).toContain("use the workflow tool to fulfill the request");
+		expect(latestModeNotice(harness)).not.toContain("The workflow tool is not active");
 		const firstCount = harness.session.messages.length;
 		await harness.session.prompt("Explain one function");
 		expect(harness.session.messages.slice(firstCount).some((message) => message.role === "custom")).toBe(false);
