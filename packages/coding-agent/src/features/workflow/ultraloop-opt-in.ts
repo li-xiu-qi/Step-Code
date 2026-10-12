@@ -176,7 +176,7 @@ export function createUltraloopOptInExtension(options: UltraloopOptInExtensionOp
 			sessionMode = persistedSessionMode(ctx.sessionManager.getEntries()) ?? false;
 			optedInThisTurn = false;
 			setTurnBudget(undefined);
-			ctx.ui.setStatus("ultracode", undefined);
+			ctx.ui.setStatus("ultracode", sessionMode ? "Ultracode on" : undefined);
 		});
 
 		// BeforeAgentStartEventResult.message is appended after the real user input

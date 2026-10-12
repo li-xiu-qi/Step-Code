@@ -430,10 +430,12 @@ describe("createUltraloopOptInExtension", () => {
 		install(h);
 		await h.commands.get("ultraloop")?.handler("on", makeCtx(h.notifications, h.statuses, h.contextEntries));
 		h.handlers.get("session_start")?.({ type: "session_start" } as never);
+		expect(h.statuses.get("ultracode")).toBe("Ultracode on");
 		expect(startOrdinaryTurn(h)?.message?.content).toContain("Ultraloop is on for the session");
 
 		await h.commands.get("ultraloop")?.handler("off", makeCtx(h.notifications, h.statuses, h.contextEntries));
 		h.handlers.get("session_start")?.({ type: "session_start" } as never);
+		expect(h.statuses.has("ultracode")).toBe(false);
 		expect(startOrdinaryTurn(h)?.message?.customType).not.toBe("ultraloop-opt-in");
 	});
 
@@ -568,7 +570,7 @@ describe("Ultracode discovery and command aliases", () => {
 		expect(h.statuses.has("ultracode")).toBe(false);
 		await command.handler("on", ctx);
 		h.handlers.get("session_start")?.({ type: "session_start" } as never, ctx);
-		expect(h.statuses.has("ultracode")).toBe(false);
+		expect(h.statuses.get("ultracode")).toBe("Ultracode on");
 		expect(startOrdinaryTurn(h)?.message?.content).toContain("Ultraloop is on for the session");
 	});
 
