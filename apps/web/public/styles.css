@@ -15,7 +15,6 @@
   --success: #3d9950;
   --danger-surface: #fff0ee;
   --attention-surface: #fff7df;
-  --avatar-surface: #dedcdf;
   --code-surface: #f7f7f8;
   --shadow: rgb(0 0 0 / 12%);
   --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
@@ -34,8 +33,8 @@
   --control-pad-x: 9px;       /* horizontal padding inside a control */
   --control-select-max-w: 180px;
   --control-h-md: 34px;       /* inputs, code-block header, list heading */
-  --control-h-sm: 30px;       /* icon button, stop button, avatar, brand mark */
-  --control-h-lg: 36px;       /* send button, large avatar */
+  --control-h-sm: 30px;       /* icon button, stop button, brand mark */
+  --control-h-lg: 36px;       /* send button, list row */
   --control-h-xs: 22px;       /* inline row buttons */
   --input-h: 28px;            /* tag create input */
   --brand-row-h: 64px;
@@ -101,7 +100,6 @@ html[data-theme="dark"] {
   --success: #64bb75;
   --danger-surface: #3d2726;
   --attention-surface: #3a3323;
-  --avatar-surface: #46464a;
   --code-surface: #222224;
   --shadow: rgb(0 0 0 / 38%);
   --scrollbar-thumb: #4a4a4f;
@@ -610,22 +608,10 @@ select { appearance: none; }
   min-height: 44px;
   padding: 5px 8px;
   border-radius: var(--radius-menu);
+  color: var(--ink-2);
   text-align: left;
 }
 .user-button:hover, .user-button[aria-expanded="true"] { background: var(--hover); }
-.avatar {
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: 30px;
-  height: var(--control-h-sm);
-  border-radius: 50%;
-  background: var(--avatar-surface);
-  color: var(--ink-2);
-  font-size: 12px;
-  font-weight: 650;
-}
-.avatar.large { width: var(--control-h-lg); height: var(--control-h-lg); }
 .user-name { flex: 1; overflow: hidden; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 .user-popover {
   position: absolute;
@@ -639,10 +625,6 @@ select { appearance: none; }
   background: var(--surface);
   box-shadow: 0 12px 32px var(--shadow);
 }
-.user-popover-account { display: flex; align-items: center; gap: 10px; padding: 8px; border-bottom: 1px solid var(--line); }
-.user-popover-account span:last-child { display: grid; min-width: 0; }
-.user-popover-account strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.user-popover-account small { color: var(--ink-3); font-size: 11px; }
 .user-menu-item {
   display: flex;
   align-items: center;
@@ -657,30 +639,26 @@ select { appearance: none; }
 }
 .user-menu-item:hover { background: var(--hover); }
 .user-menu-item small { margin-left: auto; color: var(--ink-3); font-size: 10px; }
+.user-menu-item > .icon:first-child { color: var(--ink-2); }
 .user-menu-item .menu-trailing, .user-menu-item .menu-chevron { margin-left: auto; color: var(--ink-3); }
 .user-menu-item small + .menu-chevron { margin-left: 2px; }
+/* The chevron reads as "opens below" once the list is showing. */
+.user-menu-item .menu-chevron { transition: transform var(--fast); }
+.user-menu-item[aria-expanded="true"] .menu-chevron { transform: rotate(90deg); }
 .user-menu-item.danger { color: var(--danger); }
-.user-menu-divider { height: 1px; margin: 6px 2px; background: var(--line); }
-.user-submenu {
-  position: absolute;
-  left: calc(100% + 8px);
-  z-index: 15;
-  width: 164px;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-surface);
-  background: var(--surface);
-  box-shadow: 0 12px 32px var(--shadow);
-}
-.theme-submenu { bottom: 155px; }
-.language-submenu { bottom: 112px; }
+/*
+ * The choice list unfolds inside the popover rather than beside it: the sidebar
+ * clips its children, so anything anchored past its right edge was invisible.
+ */
+.user-submenu { margin: 1px 0 3px; }
 .user-submenu button {
   display: flex;
   align-items: center;
   width: 100%;
-  min-height: var(--control-h-lg);
-  padding: 0 9px;
+  min-height: 30px;
+  padding: 0 9px 0 38px;
   border-radius: var(--radius-input);
+  color: var(--ink-2);
   text-align: left;
 }
 .user-submenu button:hover { background: var(--hover); }
@@ -1408,7 +1386,7 @@ select { appearance: none; }
   outline: none;
   background: var(--surface);
 }
-.settings-overlay, .logged-out-overlay {
+.logged-out-overlay {
   position: fixed;
   inset: 0;
   z-index: 80;
@@ -1418,53 +1396,10 @@ select { appearance: none; }
   background: rgb(0 0 0 / 30%);
   backdrop-filter: blur(4px);
 }
-.settings-dialog {
-  width: min(520px, 100%);
-  overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-dialog);
-  background: var(--surface);
-  box-shadow: 0 20px 60px var(--shadow);
-}
-.settings-dialog header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  padding: 20px 22px 16px;
-  border-bottom: 1px solid var(--line);
-}
-.settings-dialog h2 { font-size: 18px; }
-.settings-dialog header p { margin-top: 3px; color: var(--ink-3); font-size: 12px; }
-.settings-section { padding: 8px 22px 18px; }
-.settings-section label {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 66px;
-  border-bottom: 1px solid var(--line);
-}
-.settings-section label:last-child { border-bottom: 0; }
-.settings-section label > span { display: grid; }
-.settings-section strong { font-size: 13px; }
-.settings-section small { color: var(--ink-3); font-size: 11px; }
-.settings-section select {
-  min-width: 122px;
-  padding: 7px 28px 7px 10px;
-  border: 1px solid var(--line);
-  border-radius: var(--radius-control);
-  outline: none;
-  background: var(--surface-soft);
-}
-.settings-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 0;
-}
-.settings-row > span:first-child { display: grid; }
-.settings-login { display: flex; flex: none; align-items: center; gap: 6px; }
+.user-popover-login { display: grid; gap: 5px; padding: 6px 9px 2px; }
+.user-popover-login small { color: var(--ink-3); font-size: 11px; }
+.user-popover-login .settings-note { margin-top: 0; color: var(--ink-3); font-size: 10px; line-height: 1.5; }
+.settings-login { display: flex; align-items: center; gap: 6px; }
 .settings-login code {
   padding: 4px 7px;
   border: 1px solid var(--line);
@@ -1473,8 +1408,6 @@ select { appearance: none; }
   color: var(--ink-2);
   font: 11px/1.4 var(--mono);
 }
-.settings-note { margin-top: 4px; color: var(--ink-3); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.settings-dialog footer { padding: 11px 22px; border-top: 1px solid var(--line); color: var(--ink-3); font-size: 11px; }
 .logged-out-overlay { background: var(--canvas); }
 .logged-out-overlay > div { display: grid; justify-items: center; text-align: center; }
 .logged-out-overlay .brand-mark { width: 42px; height: 42px; margin-bottom: 14px; }
