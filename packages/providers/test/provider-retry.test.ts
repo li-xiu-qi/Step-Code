@@ -16,6 +16,13 @@ describe("provider request retries", () => {
 		);
 		expect(providerRetryAfterMs(providerError(429, { "retry-after": "invalid" }))).toBeUndefined();
 		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "Infinity" }))).toBeUndefined();
+		// Zero and past values are an immediate retry, never a negative or undefined wait.
+		expect(providerRetryAfterMs(providerError(429, { "retry-after": "0" }))).toBe(0);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after": "-10" }))).toBe(0);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "-50" }))).toBe(0);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after": "Thu, 01 Jan 1970 00:00:00 GMT" }), 5000)).toBe(
+			0,
+		);
 	});
 	afterEach(() => {
 		vi.useRealTimers();
