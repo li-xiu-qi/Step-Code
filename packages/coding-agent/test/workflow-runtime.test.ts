@@ -1,15 +1,22 @@
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import os, { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, expect, test } from "vitest";
-import { WorkflowBudgetExceeded } from "../src/features/workflow/budget.ts";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { acquireWorkflowAdmission } from "../src/features/workflow/admission.ts";
+import {
+	clampWorkflowConcurrency,
+	configuredWorkflowConcurrencyLimit,
+	WorkflowBudgetExceeded,
+	WorkflowSemaphore,
+} from "../src/features/workflow/budget.ts";
 import {
 	createWorkflowRunPaths,
 	readJsonLines,
 	WorkflowJournal,
 	type WorkflowRunPaths,
 } from "../src/features/workflow/journal.ts";
-import { WorkflowRuntime } from "../src/features/workflow/runtime.ts";
+import { WorkflowProgressStore } from "../src/features/workflow/progress.ts";
+import { WorkflowRuntime, workflowToolResult } from "../src/features/workflow/runtime.ts";
 import { checkWorkflowPathAccess, checkWorkflowToolCall } from "../src/features/workflow/tool-profile.ts";
 import type {
 	IterateResult,
@@ -17,13 +24,21 @@ import type {
 	WorkflowAgentRunInput,
 	WorkflowAgentRunner,
 	WorkflowProgress,
+	WorkflowProgressAgent,
 	WorkflowTelemetryRecord,
 } from "../src/features/workflow/types.ts";
 
 const cleanups: string[] = [];
 let runSequence = 0;
 
+beforeEach(() => {
+	const cpu = os.cpus()[0]!;
+	vi.spyOn(os, "cpus").mockReturnValue(Array(10).fill(cpu));
+});
+
 afterEach(async () => {
+	vi.useRealTimers();
+	vi.restoreAllMocks();
 	await Promise.all(cleanups.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -40,9 +55,12 @@ function runtimeAt(
 		resumeFrom?: WorkflowRunPaths;
 		budgetTotal?: number;
 		maxConcurrency?: number;
+		providerConcurrencyLimit?: number;
+		runnerCleanupTimeoutMs?: number;
 		maxAgents?: number;
 		agentTimeoutMs?: number;
 		vmExecutor?: ConstructorParameters<typeof WorkflowRuntime>[0]["vmExecutor"];
+		nestedWorkflow?: ConstructorParameters<typeof WorkflowRuntime>[0]["nestedWorkflow"];
 	} = {},
 ): { runtime: WorkflowRuntime; journal: WorkflowJournal; paths: WorkflowRunPaths } {
 	runSequence += 1;
@@ -56,9 +74,12 @@ function runtimeAt(
 		runner,
 		budgetTotal: options.budgetTotal,
 		maxConcurrency: options.maxConcurrency,
+		providerConcurrencyLimit: options.providerConcurrencyLimit,
+		runnerCleanupTimeoutMs: options.runnerCleanupTimeoutMs,
 		maxAgents: options.maxAgents,
 		agentTimeoutMs: options.agentTimeoutMs,
 		vmExecutor: options.vmExecutor,
+		nestedWorkflow: options.nestedWorkflow,
 	});
 	return { runtime, journal, paths };
 }
@@ -70,6 +91,243 @@ function result(value: unknown, tokens = 1) {
 		usage: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, contextTokens: tokens, turns: 1 },
 	};
 }
+
+test("explicit concurrency cannot exceed the machine ceiling", () => {
+	expect(clampWorkflowConcurrency(22, 10)).toBe(8);
+	expect(clampWorkflowConcurrency(22, 32)).toBe(16);
+	expect(clampWorkflowConcurrency(2, 10)).toBe(2);
+});
+
+test("optional provider concurrency ignores blank and invalid environment values", () => {
+	for (const raw of ["", "   ", "abc", "Infinity", "-1", "0"])
+		expect(configuredWorkflowConcurrencyLimit(raw)).toBeUndefined();
+	expect(configuredWorkflowConcurrencyLimit(" 8 ")).toBe(8);
+});
+
+test("nested workflow callback failures propagate to the owning run", async () => {
+	const child = 'return await parallel([() => agent("ok"), () => { throw new ReferenceError("missingRef"); }]);';
+	const { runtime } = runtimeAt(await workspace(), async () => result("ok"), {
+		nestedWorkflow: (_name, args, parent, depth) =>
+			parent.runNestedScript(child, args, depth + 1, { filename: "child.js" }),
+	});
+	const output = await runtime.runScript('return await workflow("child");', null);
+	expect(output).toMatchObject({
+		status: "partial_failed",
+		summary: { total: 1, completed: 1, failed: 0, failedCallbacks: 1 },
+		taskFailures: [{ primitive: "parallel", index: 1, script: "child.js", message: "ReferenceError: missingRef" }],
+	});
+});
+
+test.each([false, true])("agent failures are not double counted as callback failures (nested=%s)", async (nested) => {
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async () => ({ status: "failed", errorMessage: "provider failed" }),
+		{
+			nestedWorkflow: (_name, args, parent, depth) =>
+				parent.runNestedScript('return await agent("bad");', args, depth + 1),
+		},
+	);
+	const output = await runtime.runScript(
+		nested ? 'return await parallel([() => workflow("child")]);' : 'return await parallel([() => agent("bad")]);',
+		null,
+	);
+	expect(output.status).toBe("failed");
+	expect(output.summary).toEqual({ total: 1, completed: 0, failed: 1 });
+	expect(output.taskFailures).toBeUndefined();
+});
+
+test("unawaited nested workflows fail rather than returning a successful zero-call run", async () => {
+	const { runtime, paths } = runtimeAt(await workspace(), async () => result("ok"), {
+		nestedWorkflow: (_name, args, parent, depth) =>
+			parent.runNestedScript('return await agent("child");', args, depth + 1),
+	});
+	await expect(runtime.runScript('void workflow("child"); return "done";', null)).rejects.toThrow("unawaited");
+	const progress = JSON.parse(await readFile(paths.progressPath, "utf8"));
+	expect(progress.status).toBe("failed");
+	expect(progress.agents.every((agent: { status: string }) => !["running", "queued"].includes(agent.status))).toBe(
+		true,
+	);
+});
+
+test("a failing terminal progress write never replaces the run's terminal error", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "progress_write_failure");
+	const journal = new WorkflowJournal(paths);
+	// A disk that only fails on terminal writes: the run's real error must survive.
+	class TerminalFailingProgress extends WorkflowProgressStore {
+		override async update(
+			patch: Partial<WorkflowProgress> & { agent?: WorkflowProgressAgent },
+		): Promise<WorkflowProgress> {
+			if (patch.status !== undefined && patch.status !== "running") throw new Error("progress disk full");
+			return super.update(patch);
+		}
+	}
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "progress_write_failure",
+		name: "test",
+		journal,
+		progress: new TerminalFailingProgress(paths.progressPath, {
+			schemaVersion: 1,
+			runId: "progress_write_failure",
+			name: "test",
+			status: "running",
+			startedAt: 0,
+			updatedAt: 0,
+			agents: [],
+			completedAgents: 0,
+			totalAgents: 0,
+			spentTokens: 0,
+		}),
+		runner: async () => {
+			throw new Error("provider exploded");
+		},
+	});
+	await expect(runtime.runScript('return await agent("boom");', null)).rejects.toThrow("provider exploded");
+	const entries = await readJsonLines<{ status?: string; error?: string }>(journal.paths.journalPath);
+	expect(entries.filter((entry) => entry.status === "failed")).toMatchObject([
+		{ status: "failed", error: expect.stringContaining("provider exploded") },
+	]);
+});
+
+test("shell interpolation errors before agent() cannot become a successful zero-call workflow", async () => {
+	let calls = 0;
+	const { runtime, paths } = runtimeAt(await workspace(), async (input) => {
+		calls++;
+		return result(input.prompt);
+	});
+	const output = await runtime.runScript(
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: Execute the user's broken JS template verbatim in the guest VM.
+		'const tasks = Array.from({length: 10}, () => () => agent(`sleep $d; echo "slept=${d}s"`)); return await parallel(tasks);',
+		null,
+	);
+	expect(calls).toBe(0);
+	expect(output).toMatchObject({ status: "failed", agentCalls: 0, summary: { failedCallbacks: 10 } });
+	expect(output.taskFailures).toHaveLength(10);
+	expect(
+		output.taskFailures?.every(
+			(failure) => failure.message.includes("ReferenceError") && failure.message.includes("d"),
+		),
+	).toBe(true);
+	expect(workflowToolResult(output).isError).toBe(true);
+	expect(workflowToolResult(output).content).toMatchObject([{ text: expect.stringContaining("ReferenceError") }]);
+	const progress = JSON.parse(await readFile(paths.progressPath, "utf8"));
+	expect(progress.status).toBe("failed");
+	expect(progress.taskFailures).toHaveLength(10);
+});
+
+test("ordinary JS strings preserve shell substitutions and dispatch all ten agents", async () => {
+	const prompts: string[] = [];
+	const { runtime } = runtimeAt(await workspace(), async (input) => {
+		prompts.push(input.prompt);
+		return result("ok");
+	});
+	const output = await runtime.runScript(
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: Shell substitutions must survive JavaScript string construction.
+		"const command = 'sleep $d; echo \"slept=${d}s\"'; return await parallel(Array.from({length: 10}, () => () => agent(command)));",
+		null,
+	);
+	expect(output).toMatchObject({
+		status: "completed",
+		agentCalls: 10,
+		summary: { total: 10, completed: 10, failed: 0 },
+	});
+	// biome-ignore lint/suspicious/noTemplateCurlyInString: Assert the exact literal shell command.
+	expect(prompts).toEqual(Array(10).fill('sleep $d; echo "slept=${d}s"'));
+});
+
+test("throttling one wave reduces cap once and queued work resumes after releases", async () => {
+	const semaphore = new WorkflowSemaphore(8);
+	const releases = await Promise.all(Array.from({ length: 8 }, () => semaphore.acquire()));
+	let admitted = 0;
+	const queued = Array.from({ length: 3 }, () =>
+		semaphore.acquire().then((release) => {
+			admitted++;
+			return release;
+		}),
+	);
+	const epoch = semaphore.epoch;
+	semaphore.throttle(epoch, 0);
+	semaphore.throttle(epoch, 0);
+	expect(semaphore.max).toBe(6);
+	for (const release of releases.slice(0, 2)) release();
+	await Promise.resolve();
+	expect(admitted).toBe(0);
+	for (const release of releases.slice(2)) release();
+	for (const release of await Promise.all(queued)) release();
+	expect(admitted).toBe(3);
+	semaphore.dispose();
+});
+
+test("cooldown blocks new admissions, cancellation removes waiters, and successes recover cap", async () => {
+	vi.useFakeTimers();
+	const semaphore = new WorkflowSemaphore(4);
+	semaphore.throttle(semaphore.epoch, 1000);
+	const controller = new AbortController();
+	const cancelled = semaphore.acquire(controller.signal);
+	const cancelledCheck = expect(cancelled).rejects.toThrow("aborted");
+	controller.abort();
+	await cancelledCheck;
+	let admitted = 0;
+	const pending = Array.from({ length: 4 }, () =>
+		semaphore.acquire().then((release) => {
+			admitted++;
+			return release;
+		}),
+	);
+	await vi.advanceTimersByTimeAsync(999);
+	expect(admitted).toBe(0);
+	await vi.advanceTimersByTimeAsync(1);
+	expect(admitted).toBe(3);
+	for (let i = 0; i < 4; i++) semaphore.succeeded(semaphore.epoch);
+	expect(semaphore.max).toBe(4);
+	for (const release of await Promise.all(pending)) release();
+	semaphore.dispose();
+	expect(vi.getTimerCount()).toBe(0);
+});
+
+test("parallel failures survive null filtering in final tool output and disk progress", async () => {
+	const { runtime, paths } = runtimeAt(await workspace(), async (input) =>
+		input.prompt === "bad"
+			? { status: "failed", errorMessage: "429 concurrency reached, current: 9, limit: 8" }
+			: result("ok"),
+	);
+	const output = await runtime.runScript(
+		'return (await parallel([() => agent("ok"), () => agent("bad")])).filter(Boolean);',
+		null,
+	);
+	expect(output).toMatchObject({
+		status: "partial_failed",
+		value: ["ok"],
+		summary: { total: 2, completed: 1, failed: 1 },
+		failures: [{ error: { code: "RATE_LIMITED", retryable: true } }],
+	});
+	expect(workflowToolResult(output).isError).toBe(true);
+	expect(workflowToolResult(output).content).toMatchObject([
+		{ text: expect.stringContaining("429 concurrency reached") },
+	]);
+	const progress = JSON.parse(await readFile(paths.progressPath, "utf8"));
+	expect(progress.status).toBe("partial_failed");
+	expect(progress.agents[1].error.message).toContain("429");
+});
+
+test("a recovered 429 adjusts cap without restarting the node or reporting it failed", async () => {
+	let calls = 0;
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async (input) => {
+			calls++;
+			input.onModelRequest?.({ type: "rate_limit", attempt: 1, maxRetries: 3, delayMs: 0, message: "429" });
+			input.onModelRequest?.({ type: "started" });
+			input.onModelRequest?.({ type: "succeeded" });
+			return result("ok");
+		},
+		{ maxConcurrency: 4 },
+	);
+	const output = await runtime.runScript('return await agent("test");', null);
+	expect(calls).toBe(1);
+	expect(output).toMatchObject({ status: "completed", failures: [], concurrency: { limit: 4, cap: 3 } });
+});
 
 test("agent retries invalid schema output and strips unknown fields", async () => {
 	const cwd = await workspace();
@@ -337,14 +595,220 @@ test("parallel calls cannot race past the workflow agent limit", async () => {
 
 test("agent timeout aborts the attempt and releases its semaphore slot", async () => {
 	const cwd = await workspace();
-	const { runtime, journal } = runtimeAt(cwd, async () => new Promise(() => {}), {
-		agentTimeoutMs: 1_000,
-		maxConcurrency: 1,
-	});
+	const { runtime, journal } = runtimeAt(
+		cwd,
+		async (input) =>
+			new Promise((resolve) => {
+				input.signal?.addEventListener("abort", () => resolve({ status: "aborted" }), { once: true });
+			}),
+		{
+			agentTimeoutMs: 1_000,
+			maxConcurrency: 1,
+		},
+	);
 	await journal.initialize("agent-timeout");
 
 	await expect(runtime.agent("never settles")).rejects.toThrow("timed out after 1000ms");
 	expect(runtime.semaphore.active).toBe(0);
+});
+
+test("script failure cancels running and queued nodes, awaits cleanup, and seals terminal progress", async () => {
+	let signalStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		signalStarted = resolve;
+	});
+	const calls: string[] = [];
+	let cleaned = false;
+	const { runtime, paths } = runtimeAt(
+		await workspace(),
+		async (input) => {
+			calls.push(input.prompt);
+			signalStarted();
+			await new Promise<void>((resolve) =>
+				input.signal?.addEventListener(
+					"abort",
+					() => {
+						setTimeout(() => {
+							cleaned = true;
+							resolve();
+						}, 10);
+					},
+					{ once: true },
+				),
+			);
+			return { status: "aborted" };
+		},
+		{
+			maxConcurrency: 1,
+			vmExecutor: async (_script, _args, host) => {
+				void host.agent("running", {});
+				void host.agent("queued", {});
+				await started;
+				throw new Error("script exploded");
+			},
+		},
+	);
+	await expect(runtime.runScript("bad script", null)).rejects.toThrow("script exploded");
+	expect(cleaned).toBe(true);
+	expect(calls).toEqual(["running"]);
+	const before = await readFile(paths.progressPath, "utf8");
+	const progress = JSON.parse(before);
+	expect(progress).toMatchObject({ status: "failed", message: "script exploded" });
+	expect(progress.agents.every((a: { status: string }) => a.status === "aborted")).toBe(true);
+	const journal = await readJsonLines<{ status: string }>(paths.journalPath);
+	expect(journal).toHaveLength(2);
+	expect(journal.every((entry) => entry.status === "aborted")).toBe(true);
+	await expect(runtime.agent("late")).rejects.toThrow("scope is closed");
+	runtime.log("late update");
+	expect(await readFile(paths.progressPath, "utf8")).toBe(before);
+});
+
+test("returning with detached agent calls fails and cancels them instead of claiming completion", async () => {
+	let aborted = false;
+	let signalStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		signalStarted = resolve;
+	});
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async (input) => {
+			signalStarted();
+			await new Promise<void>((resolve) =>
+				input.signal?.addEventListener(
+					"abort",
+					() => {
+						aborted = true;
+						resolve();
+					},
+					{ once: true },
+				),
+			);
+			return { status: "aborted" };
+		},
+		{
+			vmExecutor: async (_script, _args, host) => {
+				void host.agent("detached", {});
+				await started;
+				return { value: null, meta: {} };
+			},
+		},
+	);
+	await expect(runtime.runScript("missing await", null)).rejects.toThrow("unawaited agent calls");
+	expect(aborted).toBe(true);
+});
+
+test("abort during admission progress never calls the runner", async () => {
+	const cwd = await workspace();
+	const controller = new AbortController();
+	let calls = 0;
+	const paths = createWorkflowRunPaths(cwd, "abort-before-runner");
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "abort-before-runner",
+		name: "abort",
+		journal: new WorkflowJournal(paths),
+		signal: controller.signal,
+		onProgress: (progress) => {
+			if (progress.agents.some((agent) => agent.status === "running")) controller.abort();
+		},
+		runner: async () => {
+			calls++;
+			return result("unexpected");
+		},
+	});
+	await expect(runtime.runScript('return await agent("test");', null)).rejects.toThrow(/aborted/i);
+	expect(calls).toBe(0);
+});
+
+test("uncooperative runners retain admission until settlement, then the pool can be recreated", async () => {
+	let started!: () => void;
+	const ready = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	let finish!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
+	const first = runtimeAt(
+		await workspace(),
+		async () => {
+			started();
+			await gate;
+			return result("late");
+		},
+		{
+			maxConcurrency: 1,
+			providerConcurrencyLimit: 1,
+			runnerCleanupTimeoutMs: 10,
+			vmExecutor: async (_script, _args, host) => {
+				void host.agent("uncooperative", {});
+				await ready;
+				throw new Error("stop this run");
+			},
+		},
+	);
+	try {
+		await expect(first.runtime.runScript("stop", null)).rejects.toThrow("stop this run");
+		const progress = JSON.parse(await readFile(first.paths.progressPath, "utf8"));
+		expect(progress.agents[0].error.message).toContain("shared slot remains reserved");
+		let nextCalls = 0;
+		const next = runtimeAt(
+			await workspace(),
+			async () => {
+				nextCalls++;
+				return result("ok");
+			},
+			{ maxConcurrency: 1, providerConcurrencyLimit: 1 },
+		);
+		const run = next.runtime.runScript('return await agent("next");', null);
+		await vi.waitFor(() => expect(next.runtime.semaphore.active).toBe(1));
+		expect(nextCalls).toBe(0);
+		finish();
+		expect((await run).status).toBe("completed");
+		expect(nextCalls).toBe(1);
+		const recreated = acquireWorkflowAdmission(2);
+		expect(recreated.semaphore.active).toBe(0);
+		expect(recreated.semaphore.max).toBe(2);
+		recreated.release();
+	} finally {
+		finish();
+	}
+});
+
+test("two workflows share one host window and both drain their queues", async () => {
+	let active = 0;
+	let peak = 0;
+	let startedCount = 0;
+	let signalSaturated!: () => void;
+	const saturated = new Promise<void>((resolve) => {
+		signalSaturated = resolve;
+	});
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const runner: WorkflowAgentRunner = async (input) => {
+		active++;
+		startedCount++;
+		peak = Math.max(peak, active);
+		if (active === 2) signalSaturated();
+		await gate;
+		active--;
+		return result(input.prompt);
+	};
+	const first = runtimeAt(await workspace(), runner, { maxConcurrency: 2, providerConcurrencyLimit: 2 });
+	const second = runtimeAt(await workspace(), runner, { maxConcurrency: 2, providerConcurrencyLimit: 2 });
+	const script = 'return await parallel([agent("a"), agent("b"), agent("c")]);';
+	const runs = [first.runtime.runScript(script, null), second.runtime.runScript(script, null)];
+	await saturated;
+	await new Promise((resolve) => setTimeout(resolve, 20));
+	expect(startedCount).toBe(2);
+	release();
+	const results = await Promise.all(runs);
+	expect(results.map((run) => run.status)).toEqual(["completed", "completed"]);
+	expect(peak).toBe(2);
+	expect(startedCount).toBe(6);
+	expect(active).toBe(0);
 });
 
 test("named tool profiles resolve and writable agents remain single-writer", async () => {

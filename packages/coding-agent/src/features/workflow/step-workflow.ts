@@ -10,6 +10,7 @@ import type {
 import { resolveStepStorageRoot } from "../../step/storage-root.ts";
 import type { StepTelemetryReporter } from "../../step/telemetry.ts";
 import { createDefaultWorkflowAgentRunner } from "./agent-runner.ts";
+import { configuredWorkflowConcurrencyLimit } from "./budget.ts";
 import { createWorkflowRunPaths, newWorkflowRunId, resolveWorkflowRoot, WorkflowJournal } from "./journal.ts";
 import { formatWorkflowStatus, listSavedWorkflows, listWorkflowRuns } from "./progress.ts";
 import { resolveWorkflowRegistration } from "./registration-gate.ts";
@@ -32,8 +33,22 @@ export const WorkflowParams = Type.Object({
 	args: Type.Optional(Type.Unknown({ description: "JSON arguments exposed as the script's args value" })),
 	resumeFromRunId: Type.Optional(Type.String({ description: "Resume the matching cached journal prefix" })),
 	budget: Type.Optional(Type.Integer({ minimum: 0, description: "Optional input+output token budget" })),
-	maxConcurrency: Type.Optional(Type.Integer({ minimum: 1, maximum: 32 })),
-	agentTimeoutMs: Type.Optional(Type.Integer({ minimum: 1_000, maximum: 3_600_000 })),
+	maxConcurrency: Type.Optional(
+		Type.Integer({
+			minimum: 1,
+			maximum: 32,
+			description:
+				"Requested concurrency; can only lower the host ceiling (CPU count and any configured provider limit). Rate limiting can reduce the active cap further.",
+		}),
+	),
+	agentTimeoutMs: Type.Optional(
+		Type.Integer({
+			minimum: 1_000,
+			maximum: 3_600_000,
+			description:
+				"Total execution deadline per node, including model requests, tools and retries; excludes queue time. Allow model overhead in addition to tool durations. Default 30 minutes.",
+		}),
+	),
 });
 
 export type WorkflowRequest = {
@@ -170,7 +185,14 @@ No silent caps: log() whatever you drop — top-N truncations, skipped retries, 
 Sizing: default medium; keep a run under ~15 agents unless the user asks for scale.
 
 Mechanics:
-- parallel(tasks) IS a barrier: it awaits every task before returning, and a task that throws resolves to null in the result array — the call never rejects, so .filter(Boolean) before using the results. pipeline(items, ...stages) runs each item's stage chain concurrently with NO barrier between stages: item A can be in stage 3 while item B is still in stage 1, and a stage sees only its own item, never sibling items' earlier-stage output. Stage callbacks receive (prevResult, originalItem, index); a stage that throws drops that item to null and skips its remaining stages. Both accept at most 4096 entries. Prefer pipeline(); insert a parallel() barrier between stages only when stage N truly needs every stage N-1 result (dedup, early exit, cross-referencing).
+- Explicit counted fan-out requests such as "launch 10 subagents" or "开10个子agent" also grant per-turn workflow consent, confirmed by a system-reminder. Submit all independent tasks together and let admission queue them; do not manually split 10 tasks into 8+2 waves just because the window is eight.
+- When embedding shell commands in JavaScript, preserve shell substitutions as data. Prefer a normal single- or double-quoted JS string for shell code and concatenate only the JS values you need. A shell variable inside a JavaScript template literal is otherwise evaluated as a JS identifier before agent() is called. Callback failures are returned in taskFailures with the primitive/index and original error; fix those errors rather than treating a zero-call run as completed work.
+- Distinguish worker counts from later stages: 15 worker agents followed by one summary agent means 15 workers, one subsequent summarizer, and 16 total calls. Later summary/verification stages are allowed unless the user explicitly caps the total agent-call budget. Prefer script code for pure sorting/sums. The shared FIFO window refills as nodes finish; do not describe it as fixed waves unless the script explicitly batches tasks.
+- Use the returned timing.runElapsedMs and timing.maxNodeExecutionMs for workflow/node durations. A tool's reported sleep/elapsed time is only part of node execution and cannot establish the node's total duration or prove its timeout behavior.
+- Canonical fan-out: return await parallel(items.map(item => () => agent(String(item), {label: String(item)}))); Promise arrays also work: return await parallel(items.map(item => agent(String(item)))); Always await or return the entire operation. Returning early cancels unfinished nodes and fails the run. Invalid entries reject the batch; do not pass plain strings or objects.
+- Report only observed tool outputs. When a task must report a random choice or duration, capture and print it in the same command that performs the operation; do not guess a value after a command with no output. Use agent(..., {schema}) to enforce the required output fields and ranges.
+- maxConcurrency can only lower the host ceiling (CPU count, optionally lowered further by a configured provider limit). The final result reports requested/effective concurrency. Temporary 429 errors retry the current model request and reduce the admission cap. Inspect status, summary and failures: partial_failed/failed means some nodes did not complete, even when the script filters null results. Report those nodes and their causes explicitly; existing files or passing tests do not prove a failed node completed its assigned work. taskFailures entries carry their script when they came from a nested workflow.
+- parallel(tasks) accepts functions or promises and awaits all of them. A task rejection becomes null; invalid arguments reject the batch. Inspect final summary/failures even when filtering null results. pipeline(items, ...stages) runs each item's stage chain concurrently with NO barrier between stages: item A can be in stage 3 while item B is still in stage 1, and a stage sees only its own item, never sibling items' earlier-stage output. Stage callbacks receive (prevResult, originalItem, index); a stage that throws drops that item to null and skips its remaining stages. Both accept at most 4096 entries. Prefer pipeline(); insert a parallel() barrier between stages only when stage N truly needs every stage N-1 result (dedup, early exit, cross-referencing).
 - agent(prompt, {schema}) forces structured JSON output and retries schema mismatches up to 3 attempts, feeding validation errors back; failed attempts still consume budget.
 - Give agent() a short descriptive label; the live tool row shows running/queued counts, assigned tasks, phases, and terminal states while the workflow executes.
 - Budgets fail closed once spend crosses the limit; budget.total is null when unlimited, so guard adaptive waves with budget.total && budget.remaining() > estimate. A "+500k"-style token target in the user's current message becomes the run's default budget; an explicit budget parameter overrides it.
@@ -185,10 +207,11 @@ Mechanics:
 				"Never infer workflow opt-in from task shape or size, and never carry a per-turn opt-in forward from an earlier turn; a harness system-reminder confirms keyword, phrase, and session-standing opt-ins (saved-workflow and skill invocations are valid without one), and the tool being registered is an environment capability, not consent.",
 				"When ultraloop is on for the session, the opt-in is standing: author and run a workflow for every substantive task by default, treat token cost as unconstrained, and aim for the most exhaustive correct answer. For multi-phase work, run several workflows in sequence — one per phase — so you stay in the loop between them. Lean toward adversarially verifying findings unless the work is already verified. Solo only on conversational turns or trivial mechanical edits.",
 				"Use a short inline script for experiments and a saved script or scriptPath for repeatable work; /workflows lists saved workflows and recent runs, and /ultraloop toggles session-standing mode.",
+				"Report worker nodes, additional summary/verification stages, and total agent calls separately. A requested worker count does not prohibit later stages; honor a strict total agent-call budget when explicitly specified. Concurrency queues refill continuously, not in fixed waves unless the script explicitly batches.",
 				"Default to a medium run under ~15 agents unless the user asks for scale or ultraloop is on for the session, and log() anything dropped silently: top-N truncations, skipped retries, sampling.",
 				"Spend agents on verification: adversarial verify with perspective-diverse skeptics (majority-refute kills a finding), judge panels over single attempts, multi-modal sweeps, loop-until-dry stopping after K empty rounds, and a final completeness critic.",
 				"Prefer pipeline() for per-item flows; it runs each item's stage chain concurrently with no barrier between stages, so a stage never sees sibling items' earlier-stage output. Stage callbacks receive (prevResult, originalItem, index), and a throwing stage drops that item to null and skips its remaining stages. Use a parallel() wave between stages only when a stage needs every previous-stage result (dedup, early exit, cross-referencing).",
-				"parallel(tasks) is a barrier: it awaits every task function before returning; a task that throws resolves to null in the result array, so .filter(Boolean) the results.",
+				"parallel(tasks) accepts functions or promises: await parallel(items.map(item => () => agent(String(item)))); task rejections become null, but invalid entries reject the batch. Always await/return the complete operation. The final summary/failures retain failed nodes even if nulls were filtered.",
 				"Pass schema to agent() whenever a later stage consumes the result; mismatches are retried up to 3 attempts with validation errors appended, then the call fails.",
 				"Budgets fail closed; budget.total is null when unlimited, so guard adaptive extra waves with budget.total && budget.remaining() > estimate. A \"+500k\"-style token target in the user's message sets the run's default budget; an explicit budget parameter overrides it.",
 				"Resume with resumeFromRunId plus the identical script and args to replay the cached journal prefix; the first changed call and everything after it re-run live. The tool result's scriptPath points at the persisted script copy — edit it and re-invoke with scriptPath to iterate.",
@@ -228,6 +251,7 @@ Mechanics:
 						telemetry: options.telemetry,
 						budgetTotal: request.budget ?? options.turnState?.budgetTotal ?? options.budgetTotal,
 						maxConcurrency: request.maxConcurrency ?? options.maxConcurrency,
+						providerConcurrencyLimit: configuredWorkflowConcurrencyLimit(),
 						maxAgents: options.maxAgents,
 						agentTimeoutMs: request.agentTimeoutMs ?? options.agentTimeoutMs,
 						context: { ...ctx, signal: controller.signal },
@@ -247,6 +271,7 @@ Mechanics:
 					});
 					return workflowToolResult(result);
 				} finally {
+					controller.abort();
 					activeRuns.delete(controller);
 					if (signal) signal.removeEventListener("abort", abort);
 				}

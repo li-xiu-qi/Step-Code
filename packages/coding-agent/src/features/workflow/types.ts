@@ -52,6 +52,7 @@ export interface WorkflowAgentOptions {
 }
 
 export interface WorkflowAgentRunInput {
+	onModelRequest?: (event: import("../../core/rate-limit.ts").ModelRequestProgress) => void;
 	prompt: string;
 	options: WorkflowAgentOptions;
 	cwd: string;
@@ -87,6 +88,9 @@ export interface WorkflowMeta {
 }
 
 export interface WorkflowProgressAgent {
+	error?: { code: string; message: string; retryable: boolean; retryExhausted?: boolean };
+	rateLimitRetries?: number;
+	retry?: { attempt: number; maxRetries: number; delayMs: number };
 	id: string;
 	label: string;
 	/** Bounded summary of the assigned prompt, independent of an optional short label. */
@@ -99,10 +103,12 @@ export interface WorkflowProgressAgent {
 }
 
 export interface WorkflowProgress {
+	taskFailures?: WorkflowTaskFailure[];
 	schemaVersion: 1;
 	runId: string;
 	name: string;
-	status: "running" | "completed" | "failed" | "aborted" | "budget_exceeded";
+	status: "running" | "stopping" | "completed" | "partial_failed" | "failed" | "aborted" | "budget_exceeded";
+	concurrency?: { requested?: number; ceiling: number; limit: number; cap: number; sharedActive?: number };
 	startedAt: number;
 	updatedAt: number;
 	currentPhase?: string;
@@ -118,7 +124,14 @@ export interface WorkflowRunResult {
 	schemaVersion: 1;
 	runId: string;
 	name: string;
-	status: "completed" | "failed" | "aborted";
+	status: "completed" | "partial_failed" | "failed" | "aborted";
+	summary?: { total: number; completed: number; failed: number; failedCallbacks?: number };
+	/** Callback failures can happen before agent() is reached; they are not extra agent nodes. */
+	taskFailures?: WorkflowTaskFailure[];
+	/** Node execution includes model/tool/retry/shutdown time; not just tool-reported duration. */
+	timing?: { runElapsedMs: number; maxNodeExecutionMs: number };
+	failures?: WorkflowProgressAgent[];
+	concurrency?: WorkflowProgress["concurrency"];
 	value: unknown;
 	meta: WorkflowMeta;
 	/** Persisted copy of the executed script; edit and re-invoke with scriptPath to iterate. */
@@ -130,6 +143,14 @@ export interface WorkflowRunResult {
 	agentCalls: number;
 	phases: WorkflowPhase[];
 	stopReason?: string;
+}
+
+export interface WorkflowTaskFailure {
+	script?: string;
+	primitive: "parallel" | "pipeline";
+	index: number;
+	stage?: number;
+	message: string;
 }
 
 export interface IterateOptions {
@@ -171,10 +192,12 @@ export interface WorkflowJournalEntry {
 	callHash: string;
 	prompt: string;
 	options: WorkflowJsonValue;
-	status: "completed" | "failed" | "cached";
+	status: "completed" | "failed" | "aborted" | "cached";
 	result?: unknown;
 	usage: WorkflowUsage;
 	attempt: number;
+	/** Request-level 429 retries across this node's schema attempts. */
+	rateLimitRetries?: number;
 	createdAt: number;
 	error?: string;
 }

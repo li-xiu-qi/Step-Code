@@ -11,6 +11,22 @@ interface ProviderError extends Error {
 	headers: Headers | undefined;
 }
 
+/** Preserve Retry-After when provider retries are disabled or exhausted. */
+export function providerRetryAfterMs(error: unknown, now = Date.now()): number | undefined {
+	if (!isProviderError(error) || error.status !== 429) return undefined;
+	const milliseconds = error.headers?.get("retry-after-ms");
+	const header = error.headers?.get("retry-after");
+	const value =
+		milliseconds !== null && milliseconds !== undefined
+			? Number(milliseconds)
+			: header
+				? /^\d+(\.\d+)?$/.test(header)
+					? Number(header) * 1000
+					: Date.parse(header) - now
+				: NaN;
+	return Number.isFinite(value) ? Math.max(0, value) : undefined;
+}
+
 function isProviderError(error: unknown): error is ProviderError {
 	if (!(error instanceof Error) || !("status" in error) || !("headers" in error)) return false;
 	return (

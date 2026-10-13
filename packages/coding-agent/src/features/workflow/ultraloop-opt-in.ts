@@ -45,6 +45,12 @@ const TRIGGER_PHRASES: readonly RegExp[] = [
 	/\borchestrate (?:this|it) with sub-?agents\b/iu,
 ];
 const OPT_IN_PATTERNS: readonly RegExp[] = [KEYWORD, ...TRIGGER_PHRASES];
+// An explicit request to launch multiple agents is orchestration consent too;
+// a bare mention, a question about agents, or a negated command is not.
+const COUNTED_AGENT_REQUESTS = [
+	/(?:^|[，。！？;\n])\s*(?:(?:请帮我|帮我|请|我想)\s*)?(?:启动|开启|开|创建|派出)\s*(\d+|[一二两三四五六七八九十百千]+)\s*个?\s*(?:子\s*agents?|sub-?agents?|子代理)/iu,
+	/(?:^|[.!?;\n])\s*(?:please\s+)?(?:spawn|start|launch)\s+(\d+)\s+(?:sub-?agents|agents)\b/iu,
+];
 
 /**
  * Claude Code-style per-turn token target: "+500k" or "+1.5m" anywhere in the
@@ -57,6 +63,10 @@ export function detectUltraloopOptIn(prompt: string): string | undefined {
 	for (const re of OPT_IN_PATTERNS) {
 		const match = prompt.match(re)?.[0];
 		if (match !== undefined) return match;
+	}
+	for (const re of COUNTED_AGENT_REQUESTS) {
+		const match = prompt.match(re);
+		if (match?.[1] && (/^\d+$/.test(match[1]) ? Number(match[1]) > 1 : match[1] !== "一")) return match[0].trim();
 	}
 	return undefined;
 }

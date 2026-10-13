@@ -279,6 +279,7 @@ export async function executeSubagent(
 		return makeToolResult(
 			details,
 			`Invalid parameters. Provide exactly one mode. Available agents: ${formatStepAgentCatalog(discovery.agents)}`,
+			true,
 		);
 	}
 	if (parallel && parallel.length > options.maxParallelTasks) {
@@ -286,13 +287,14 @@ export async function executeSubagent(
 		return makeToolResult(
 			details,
 			`Too many parallel tasks (${parallel.length}); maximum is ${options.maxParallelTasks}.`,
+			true,
 		);
 	}
 	const tasks = parallel ?? chain ?? [single!];
 	const mode: StepSubagentDetails["mode"] = chain ? "chain" : parallel ? "parallel" : "single";
 	if (!(await confirmProjectAgents(ctx, params, discovery, tasks))) {
 		const details = buildDetails(mode, discovery, scope, []);
-		return makeToolResult(details, "Canceled: project-local agents not approved.");
+		return makeToolResult(details, "Canceled: project-local agents not approved.", true);
 	}
 
 	const records = tasks.map((task) => makeEmptyResult(task.agent, task.task));

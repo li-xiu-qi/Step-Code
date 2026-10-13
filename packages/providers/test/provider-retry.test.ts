@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { retryProviderRequest } from "../src/utils/provider-retry.ts";
+import { providerRetryAfterMs, retryProviderRequest } from "../src/utils/provider-retry.ts";
 
 function providerError(status: number | undefined, headers?: Record<string, string>): Error {
 	return Object.assign(new Error(`Provider error: ${status}`), {
@@ -9,6 +9,14 @@ function providerError(status: number | undefined, headers?: Record<string, stri
 }
 
 describe("provider request retries", () => {
+	it("parses retry hints without accepting invalid numbers or leaking headers", () => {
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "250", "retry-after": "10" }))).toBe(250);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after": "Thu, 01 Jan 1970 00:00:10 GMT" }), 1000)).toBe(
+			9000,
+		);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after": "invalid" }))).toBeUndefined();
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "Infinity" }))).toBeUndefined();
+	});
 	afterEach(() => {
 		vi.useRealTimers();
 	});

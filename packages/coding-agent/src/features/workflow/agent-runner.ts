@@ -43,6 +43,7 @@ export function createDefaultWorkflowAgentRunner(options: DefaultWorkflowAgentRu
 			signal: input.signal,
 			sessionId: `${WORKFLOW_SESSION_ID_PREFIX}${input.runId}-${input.agentId}`,
 			keepAlive: false,
+			onModelRequest: input.onModelRequest,
 			workflowAcl: {
 				baseCwd: input.cwd,
 				...(input.options.readOnly ? { readOnly: input.options.readOnly } : {}),

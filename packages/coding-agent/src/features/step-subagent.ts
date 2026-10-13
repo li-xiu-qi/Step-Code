@@ -34,6 +34,7 @@ import {
 	subagentListSignature,
 } from "./subagent/rendering.ts";
 import { createSubagentRpcSession } from "./subagent/rpc-adapter.ts";
+import { clampWorkflowConcurrency } from "./workflow/budget.ts";
 
 // Lane-notification primitives moved to ./subagent/lane-events.ts; re-exported
 // here to keep this module's public surface stable.
@@ -69,8 +70,7 @@ export {
 	WORKFLOW_SESSION_ID_PREFIX,
 } from "./subagent/helpers.ts";
 
-const MAX_PARALLEL_TASKS = 8;
-const DEFAULT_CONCURRENCY = 4;
+const MAX_PARALLEL_TASKS = 1000;
 export const MAX_JSON_LINE_BYTES = 2 * 1024 * 1024;
 const MAX_MESSAGES = 256;
 export const CHILD_MARKER = "STEPCODE_SUBAGENT_CHILD";
@@ -106,6 +106,7 @@ export interface StepSubagentRunResult {
 }
 
 export interface StepSubagentRunInput {
+	onModelRequest?: (event: import("../core/rate-limit.ts").ModelRequestProgress) => void;
 	agent: StepAgentConfig;
 	task: string;
 	cwd: string;
@@ -187,9 +188,9 @@ export interface StepSubagentExtensionOptions {
 	configDirName?: string;
 	/** Include the built-in general/explore/review/planner roles. */
 	includeBuiltinAgents?: boolean;
-	/** Maximum number of tasks accepted in one parallel call. */
+	/** Maximum batch size accepted in one parallel call; excess tasks queue instead of running. */
 	maxParallelTasks?: number;
-	/** Number of child processes allowed to run at once. */
+	/** Number of child processes allowed to run at once; tasks beyond this stay queued. */
 	maxConcurrency?: number;
 	/** Optional isolated git worktree implementation. */
 	worktreeManager?: StepWorktreeManager;
@@ -409,15 +410,34 @@ const spawnedSubagentSessions = new Set<string>();
 export async function runStepSubagentProcess(input: StepSubagentRunInput): Promise<StepSubagentRunResult> {
 	const sessionId = input.sessionId?.trim() || `${SUBAGENT_SESSION_ID_PREFIX}${randomUUID()}`;
 	const live = getLiveSubagentSession(sessionId);
-	if (live) return live.runTurn(input);
+	if (live) {
+		const result = await live.runTurn(input);
+		if (input.workflowAcl && !input.keepAlive) await live.exited;
+		return result;
+	}
 	if (spawnedSubagentSessions.has(sessionId)) input.onChildRespawn?.();
 	spawnedSubagentSessions.add(sessionId);
 	const session = await createSubagentRpcSession(input, sessionId);
-	return session.runTurn(input);
+	const result = await session.runTurn(input);
+	// A workflow node owns its child through process exit, not just agent_settled.
+	// This keeps its shared admission slot until cancellation has actually stopped
+	// the child, and lets the next workflow start without orphaned requests.
+	if (input.workflowAcl && !input.keepAlive) await session.exited;
+	return result;
 }
 
-export function makeToolResult(details: StepSubagentDetails, text: string): AgentToolResult<StepSubagentDetails> {
-	return { content: [{ type: "text", text }], details };
+export function makeToolResult(
+	details: StepSubagentDetails,
+	text: string,
+	isError = false,
+): AgentToolResult<StepSubagentDetails> {
+	return {
+		content: [{ type: "text", text }],
+		details,
+		...(isError || details.results.some((record) => record.status === "failed" || record.status === "aborted")
+			? { isError: true }
+			: {}),
+	};
 }
 
 const AgentSendTargetSchema = Type.Object({
@@ -509,7 +529,7 @@ export function createStepSubagentExtension(options: StepSubagentExtensionOption
 		maxParallelTasks: Math.max(1, Math.min(MAX_PARALLEL_TASKS, options.maxParallelTasks ?? MAX_PARALLEL_TASKS)),
 		maxConcurrency: Math.max(
 			1,
-			Math.min(options.maxConcurrency ?? DEFAULT_CONCURRENCY, options.maxParallelTasks ?? MAX_PARALLEL_TASKS),
+			Math.min(clampWorkflowConcurrency(options.maxConcurrency), options.maxParallelTasks ?? MAX_PARALLEL_TASKS),
 		),
 		telemetry: options.telemetry,
 		worktreeManager: options.worktreeManager ?? {

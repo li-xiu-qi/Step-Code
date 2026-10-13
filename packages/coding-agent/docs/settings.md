@@ -137,6 +137,7 @@ For VS Code, include `--wait` so step resumes after the editor exits:
 |---------|------|---------|-------------|
 | `retry.enabled` | boolean | `true` | Enable automatic agent-level retry on transient errors |
 | `retry.maxRetries` | number | `3` | Maximum agent-level retry attempts |
+| `retry.rateLimitMaxRetries` | number | `3` | Independent 429 retry budget per model request (0 disables, maximum 20); does not consume schema or other transient retries |
 | `retry.baseDelayMs` | number | `2000` | Base delay for agent-level exponential backoff (2s, 4s, 8s) |
 | `retry.provider.timeoutMs` | number | SDK default | Provider/SDK request timeout in milliseconds |
 | `retry.provider.maxRetries` | number | `0` | Provider/SDK retry attempts |
@@ -145,6 +146,22 @@ For VS Code, include `--wait` so step resumes after the editor exits:
 When a provider requests a retry delay longer than `retry.provider.maxRetryDelayMs`, the request fails immediately with an informative error instead of waiting silently. Set it to `0` to disable the limit.
 
 Keep `retry.provider.maxRetries` at `0` unless provider-level retries are explicitly needed. Setting it above `0` can make SDK/provider retries handle out-of-usage-limit errors before Step sees them, which may block the agent until the provider quota resets in some circumstances.
+
+Temporary 429/concurrency errors retry the current model request, preserving completed tool calls. They honor `Retry-After` when available; otherwise delays grow from 1 second to at most 30 seconds with jitter. Cancellation interrupts the wait. Explicit billing/quota exhaustion is not retried. `retry.enabled: false` disables both session retry budgets.
+
+### Workflow concurrency and failures
+
+Explicit counted fan-out requests such as `开10个子agent` / `launch 10 subagents` activate per-turn workflow orchestration without requiring the Ultraloop keyword. The ordinary `subagent` tool also accepts batches larger than its concurrent window (up to 1000 by default) and queues the excess; its default concurrency uses the same CPU-derived ceiling.
+
+The workflow ceiling is `max(1, min(16, CPU count - 2))`. Model-authored `maxConcurrency` can only lower this ceiling. Set `STEP_WORKFLOW_CONCURRENCY_LIMIT=8` to impose a lower trusted provider limit (for example, a backend allowing eight simultaneous requests). The effective ceiling is the minimum of the machine and configured limits; the final result reports requested, effective, and current concurrency.
+
+Temporary 429s reduce the admission cap by 25% (minimum one), once per congestion epoch. New nodes wait during backoff; running nodes keep their slots and retry their current request. Four successful responses allow a one-slot recovery when work is queued. Concurrent workflows share a process-wide host window, in addition to each run's lower limit. This conservatively covers all model overrides; it is not a cross-process/account-wide quota lock.
+
+`parallel()` accepts both lazy functions (`parallel(items.map(x => () => agent(String(x))))`) and eager promises (`parallel(items.map(x => agent(String(x))))`). Always await or return the operation. Invalid entries reject the batch. A script error or an early return with unfinished calls cancels running and queued nodes and waits for cleanup before publishing the terminal state; production child processes retain their shared slots until they exit. The UI shows concurrency clamping as a Notice, and script failure/cancellation separately.
+
+Node timeouts cover model requests, tool execution, and retries **after admission**, not time waiting in either queue. For experiments that report sleep durations or random choices, generate, capture and print all required values in one command, then require structured output with `agent(..., {schema})`. An empty sleep output is not evidence of the chosen duration. See [Workflow experiments](workflow-experiments.md).
+
+Failed nodes are retained in the journal and final `failures` list even if the script catches errors or filters `parallel()`'s null results. Final status is `partial_failed` for mixed outcomes and `failed` when all nodes fail; both are error tool results with successful output preserved. `summary.completed` counts successful/cached nodes, not attempted calls. Request retry counts (`rateLimitRetries`) are separate from schema `attempt`.
 
 ```json
 {

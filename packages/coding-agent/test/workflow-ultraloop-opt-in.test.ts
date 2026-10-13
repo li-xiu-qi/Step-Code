@@ -13,6 +13,28 @@ afterEach(() => {
 	vi.unstubAllEnvs();
 });
 
+test("explicit counted fan-out requests grant workflow consent without the ultraloop keyword", () => {
+	for (const prompt of [
+		"开10个子agent 随机sleep1-10s",
+		"请启动十个子代理",
+		"launch 10 subagents",
+		"帮我创建 2 个子 agent",
+	]) {
+		expect(detectUltraloopOptIn(prompt)).toBeDefined();
+	}
+	for (const prompt of [
+		"不要开10个子agent",
+		"为什么开10个子agent",
+		"开1个子agent",
+		"启动一个子代理",
+		"开零个子agent",
+		"开半个子agent",
+		"开负1个子agent",
+	]) {
+		expect(detectUltraloopOptIn(prompt)).toBeUndefined();
+	}
+});
+
 type Command = Parameters<ExtensionAPI["registerCommand"]>[1];
 
 interface Recorded {
