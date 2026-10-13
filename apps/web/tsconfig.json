@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "noEmit": false,
+    "rewriteRelativeImportExtensions": true,
+    "paths": {
+      "@step-harness/agent-core": ["../../packages/agent-core/dist/index.d.ts"],
+      "@step-harness/agent-core/*": ["../../packages/agent-core/dist/*.d.ts"],
+      "@step-harness/providers": ["../../packages/providers/dist/index.d.ts"],
+      "@step-harness/providers/*": ["../../packages/providers/dist/*.d.ts"],
+      "@step-harness/pi-tui": ["../../packages/tui/dist/index.d.ts"],
+      "@step-harness/pi-tui/*": ["../../packages/tui/dist/*.d.ts"],
+      "@step-harness/config": ["../../packages/config/dist/index.d.ts"],
+      "@step-harness/coding-agent": ["../../packages/coding-agent/dist/index.d.ts"],
+      "@step-harness/coding-agent/*": ["../../packages/coding-agent/dist/*.d.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

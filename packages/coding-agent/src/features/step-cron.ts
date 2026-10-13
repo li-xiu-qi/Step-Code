@@ -837,6 +837,23 @@ function formatCronStatus(jobs: readonly CronJob[]): string {
 		.join("\n");
 }
 
+/**
+ * Read from a captured extension context, tolerating a stale one.
+ *
+ * A ctx goes stale the moment its session is replaced — fork, newSession,
+ * switchSession or reload — and touching a stale ctx throws. Timer callbacks can
+ * land in that window, and an uncaught throw there takes down the whole host
+ * rather than just skipping one notification, so treat it as "nothing to read".
+ */
+function withLiveContext<T>(context: ExtensionContext | undefined, read: (ctx: ExtensionContext) => T): T | undefined {
+	if (!context) return undefined;
+	try {
+		return read(context);
+	} catch {
+		return undefined;
+	}
+}
+
 /** Register expression-based Cron tools; this extension has no Loop dependency. */
 export function createStepCronExtension(options: StepCronExtensionOptions = {}): ExtensionFactory {
 	return (pi: ExtensionAPI): void => {
@@ -846,8 +863,10 @@ export function createStepCronExtension(options: StepCronExtensionOptions = {}):
 			options.runtime ??
 			new StepCronRuntime({
 				telemetry: options.telemetry,
-				isIdle: () => Boolean(currentContext?.isIdle() && !currentContext.hasPendingMessages()),
-				warn: (message) => currentContext?.ui.notify(message, "warning"),
+				isIdle: () => Boolean(withLiveContext(currentContext, (ctx) => ctx.isIdle() && !ctx.hasPendingMessages())),
+				warn: (message) => {
+					withLiveContext(currentContext, (ctx) => ctx.ui.notify(message, "warning"));
+				},
 				sendMessage: (delivery) => {
 					if (delivery.kind === "missed") {
 						const jobs = delivery.jobs ?? [];

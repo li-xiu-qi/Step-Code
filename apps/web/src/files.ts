@@ -1,0 +1,183 @@
+import { open, readdir, realpath, stat } from "node:fs/promises";
+import { extname, isAbsolute, join, relative, resolve, sep } from "node:path";
+
+/** Entries returned for one directory before the listing is cut off. */
+export const MAX_DIRECTORY_ENTRIES = 1000;
+/** Largest file the preview will load as text. */
+export const MAX_PREVIEW_BYTES = 1_000_000;
+/** Largest image the raw endpoint will stream. */
+export const MAX_IMAGE_BYTES = 10_000_000;
+/** How many directories a name search may visit before giving up. */
+const MAX_SEARCH_DIRECTORIES = 4000;
+/** Bytes sniffed to decide whether a file is text. */
+const SNIFF_BYTES = 8192;
+
+/**
+ * Directories a name search does not descend into. They stay visible and
+ * expandable in the tree; walking them would spend the whole search budget on
+ * dependency and VCS internals.
+ */
+const SEARCH_SKIPPED_DIRECTORIES = new Set([".git", "node_modules", ".pnpm-store"]);
+
+const IMAGE_TYPES: Readonly<Record<string, string>> = {
+	".png": "image/png",
+	".jpg": "image/jpeg",
+	".jpeg": "image/jpeg",
+	".gif": "image/gif",
+	".webp": "image/webp",
+	".avif": "image/avif",
+	".bmp": "image/bmp",
+	".ico": "image/x-icon",
+};
+
+export interface FileTreeEntry {
+	readonly name: string;
+	/** Path relative to the workspace root, with `/` separators. */
+	readonly path: string;
+	readonly kind: "directory" | "file";
+}
+
+export interface DirectoryListing {
+	readonly entries: FileTreeEntry[];
+	/** True when the directory holds more entries than were returned. */
+	readonly truncated: boolean;
+}
+
+export type WorkspaceFile =
+	| { readonly kind: "text"; readonly path: string; readonly size: number; readonly content: string }
+	| { readonly kind: "image"; readonly path: string; readonly size: number; readonly mimeType: string }
+	| { readonly kind: "binary" | "too-large"; readonly path: string; readonly size: number };
+
+function toPosix(path: string): string {
+	return sep === "/" ? path : path.split(sep).join("/");
+}
+
+/**
+ * Resolve `inputPath` inside `cwd`, following symlinks on both sides, and refuse
+ * anything that lands outside the workspace. Comparing real paths is what stops
+ * a symlink inside the workspace from pointing the reader at the rest of the
+ * disk.
+ */
+export async function containedWorkspacePath(cwd: string, inputPath: string): Promise<string> {
+	const root = await realpath(cwd);
+	const target = await realpath(resolve(root, inputPath || "."));
+	const offset = relative(root, target);
+	if (offset === ".." || offset.startsWith(`..${sep}`) || isAbsolute(offset)) {
+		throw new Error("Path is outside the workspace");
+	}
+	return target;
+}
+
+/** One directory level, directories first. Children load on demand. */
+export async function listDirectory(cwd: string, inputPath: string): Promise<DirectoryListing> {
+	const root = await realpath(cwd);
+	const target = await containedWorkspacePath(root, inputPath);
+	const dirents = await readdir(target, { withFileTypes: true });
+	const entries = await Promise.all(
+		dirents.map(async (dirent) => {
+			let directory = dirent.isDirectory();
+			if (dirent.isSymbolicLink()) {
+				try {
+					directory = (await stat(join(target, dirent.name))).isDirectory();
+				} catch {
+					// A dangling link is listed as a file; opening it reports the error.
+				}
+			}
+			return { name: dirent.name, directory };
+		}),
+	);
+	entries.sort(
+		(left, right) => Number(right.directory) - Number(left.directory) || left.name.localeCompare(right.name),
+	);
+	return {
+		entries: entries.slice(0, MAX_DIRECTORY_ENTRIES).map((entry) => ({
+			name: entry.name,
+			path: toPosix(relative(root, join(target, entry.name))),
+			kind: entry.directory ? "directory" : "file",
+		})),
+		truncated: entries.length > MAX_DIRECTORY_ENTRIES,
+	};
+}
+
+/** The image MIME type for a path, or undefined when it is not a previewable image. */
+export function imageMimeType(path: string): string | undefined {
+	return IMAGE_TYPES[extname(path).toLowerCase()];
+}
+
+/** A NUL byte in the first block is the same heuristic git uses for "binary". */
+function looksBinary(sample: Buffer): boolean {
+	return sample.includes(0);
+}
+
+/**
+ * Read a workspace file for the preview. Never throws for "cannot show this":
+ * images, binaries and oversized files come back as a kind the client renders
+ * as a placeholder, so one odd file does not look like a server fault.
+ */
+export async function readWorkspaceFile(cwd: string, inputPath: string): Promise<WorkspaceFile> {
+	const root = await realpath(cwd);
+	const target = await containedWorkspacePath(root, inputPath);
+	const info = await stat(target);
+	if (!info.isFile()) throw new Error("Path is not a file");
+	const path = toPosix(relative(root, target));
+	const mimeType = imageMimeType(target);
+	if (mimeType) return { kind: "image", path, size: info.size, mimeType };
+	if (info.size > MAX_PREVIEW_BYTES) return { kind: "too-large", path, size: info.size };
+	const handle = await open(target, "r");
+	try {
+		const buffer = Buffer.alloc(info.size);
+		const { bytesRead } = await handle.read(buffer, 0, info.size, 0);
+		const bytes = buffer.subarray(0, bytesRead);
+		if (looksBinary(bytes.subarray(0, SNIFF_BYTES))) return { kind: "binary", path, size: info.size };
+		return { kind: "text", path, size: info.size, content: bytes.toString("utf8") };
+	} finally {
+		await handle.close();
+	}
+}
+
+/**
+ * Case-insensitive name search below the workspace root, breadth-first so
+ * shallow matches win when the result limit is hit. Symlinked directories are
+ * not followed: that keeps the walk inside the workspace and free of cycles.
+ */
+export async function searchWorkspaceFiles(
+	cwd: string,
+	query: string,
+	limit = 200,
+): Promise<{ entries: FileTreeEntry[]; truncated: boolean }> {
+	const needle = query.trim().toLowerCase();
+	if (!needle) return { entries: [], truncated: false };
+	const root = await realpath(cwd);
+	const entries: FileTreeEntry[] = [];
+	const queue = [root];
+	let visited = 0;
+	while (queue.length) {
+		if (visited >= MAX_SEARCH_DIRECTORIES) return { entries, truncated: true };
+		const directory = queue.shift() as string;
+		visited += 1;
+		let dirents: Awaited<ReturnType<typeof readDirents>>;
+		try {
+			dirents = await readDirents(directory);
+		} catch {
+			continue;
+		}
+		for (const dirent of dirents) {
+			const absolute = join(directory, dirent.name);
+			if (dirent.name.toLowerCase().includes(needle)) {
+				if (entries.length >= limit) return { entries, truncated: true };
+				entries.push({
+					name: dirent.name,
+					path: toPosix(relative(root, absolute)),
+					kind: dirent.isDirectory() ? "directory" : "file",
+				});
+			}
+			if (dirent.isDirectory() && !SEARCH_SKIPPED_DIRECTORIES.has(dirent.name)) queue.push(absolute);
+		}
+	}
+	return { entries, truncated: false };
+}
+
+async function readDirents(directory: string) {
+	const dirents = await readdir(directory, { withFileTypes: true });
+	return dirents.sort((left, right) => left.name.localeCompare(right.name));
+}

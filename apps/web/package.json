@@ -1,0 +1,15 @@
+{
+  "name": "@step-harness/web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx --tsconfig ../../tsconfig.json src/server.ts",
+    "build": "shx rm -rf dist && tsgo -p tsconfig.json && shx mkdir -p dist/public && shx cp public/* dist/public/ && shx cp openapi.yaml dist/openapi.yaml",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:e2e": "node --test test/e2e/*.e2e.mjs",
+    "typecheck": "tsgo -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@step-harness/coding-agent": "workspace:*"
+  }
+}

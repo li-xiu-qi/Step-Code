@@ -1,0 +1,258 @@
+openapi: 3.1.0
+info:
+  title: StepCode Web Host
+  version: 0.1.0
+  description: Loopback-only browser host for the StepCode AgentSessionRuntime.
+servers:
+  - url: http://127.0.0.1:3077
+paths:
+  /healthz:
+    get:
+      security: []
+      responses:
+        "200":
+          description: Host is running
+  /auth/exchange:
+    post:
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200": { description: Set signed HttpOnly cookie }
+        "401": { description: Invalid or reused launch token }
+  /auth/logout:
+    post:
+      security: []
+      responses:
+        "200": { description: Expire the StepCode Web authentication cookie }
+        "403": { description: Origin is not allowed }
+  /api/v1/bootstrap:
+    get:
+      responses:
+        "200":
+          description: Launch folder and which folder picker the page should offer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cwd: { type: string, description: Launch working directory }
+                  directoryPicker: { type: string, enum: [native, browse] }
+                  login: { $ref: "#/components/schemas/LoginReport" }
+  /api/v1/login:
+    get:
+      description: |
+        Where the model credential comes from. StepCode Web has no login screen:
+        signing in is a terminal action that writes auth.json, and this host reads
+        the same file. The response carries the source, provider and profile —
+        never the credential — plus the command that changes it.
+      responses:
+        "200":
+          description: Credential source
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginReport" }
+  /api/v1/workspaces:
+    get:
+      responses:
+        "200": { description: "Registered workspaces: path, name, available" }
+    post:
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string, description: Absolute folder path }
+      responses:
+        "201": { description: Workspace registered by its real path }
+        "400": { description: Path is missing, does not exist, or is not a directory }
+    delete:
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Workspace unregistered; files and sessions untouched }
+        "404": { description: Workspace is not registered }
+  /api/v1/workspaces/pick:
+    post:
+      description: |
+        Open the operating system folder chooser on the Host and answer with the
+        chosen absolute path, or null when the user cancels. Only available when
+        the Host serves a loopback-bound desktop session; 409 otherwise, and 409
+        while another dialog is already open. The dialog closes if the page goes
+        away before the user answers.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string, description: Dialog title }
+                startIn: { type: string, description: Folder to open at, ignored unless it exists }
+      responses:
+        "200": { description: "path is the chosen folder, or null when cancelled" }
+        "409": { description: The system picker is unavailable or already open }
+        "500": { description: The picker helper failed }
+  /api/v1/workspace/files:
+    get:
+      parameters:
+        - { name: cwd, in: query, required: true, schema: { type: string } }
+        - { name: path, in: query, schema: { type: string } }
+      responses:
+        "200": { description: "One directory level: entries (name, path, kind) and truncated" }
+        "400": { description: Path is outside the workspace or cannot be read }
+        "403": { description: cwd is not a known workspace }
+  /api/v1/workspace/file:
+    get:
+      parameters:
+        - { name: cwd, in: query, required: true, schema: { type: string } }
+        - { name: path, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "kind text|image|binary|too-large, path, size; content for text only" }
+        "400": { description: Path is outside the workspace or is not a file }
+        "403": { description: cwd is not a known workspace }
+  /api/v1/workspace/raw:
+    get:
+      parameters:
+        - { name: cwd, in: query, required: true, schema: { type: string } }
+        - { name: path, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Image bytes }
+        "413": { description: Image exceeds the preview limit }
+        "415": { description: File is not an image }
+  /api/v1/workspace/search:
+    get:
+      parameters:
+        - { name: cwd, in: query, required: true, schema: { type: string } }
+        - { name: q, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "Name matches below the workspace root: entries and truncated" }
+  /api/v1/sessions:
+    get:
+      responses:
+        "200": { description: Session list grouped by cwd by the client }
+    post:
+      responses:
+        "201": { description: New StepCode v3 session }
+  /api/v1/directories:
+    get:
+      parameters:
+        - name: path
+          in: query
+          schema: { type: string }
+      responses:
+        "200": { description: Absolute directory and immediate child folders }
+  /api/v1/sessions/{id}:
+    get:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Session snapshot }
+    delete:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Session deleted }
+  /api/v1/sessions/{id}/events:
+    get:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: SSE snapshot and agent/status/approval events }
+  /api/v1/sessions/{id}/messages:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "202": { description: Prompt accepted }
+  /api/v1/sessions/{id}/steer:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "202": { description: Steer accepted }
+  /api/v1/sessions/{id}/interrupt:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Agent interrupted }
+  /api/v1/sessions/{id}/name:
+    patch:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Renamed session snapshot }
+  /api/v1/sessions/{id}/archive:
+    patch:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Archived or restored session snapshot }
+  /api/v1/sessions/{id}/approvals/decision:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Approval decision accepted }
+        "404": { description: Approval no longer pending }
+  /api/v1/sessions/{id}/policy:
+    patch:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Persisted Step permission preset }
+  /api/v1/sessions/{id}/model:
+    patch:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Persisted model selection }
+  /api/v1/sessions/{id}/files:
+    get:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Workspace file tree }
+  /api/v1/sessions/{id}/file:
+    get:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200": { description: Workspace file contents }
+components:
+  schemas:
+    LoginReport:
+      description: |
+        Where the model credential comes from. Never contains the credential.
+        `configured` reports that one exists; `validity` reports what the
+        provider said when it was checked.
+      type: object
+      required: [source, configured, loginCommand]
+      properties:
+        source: { type: string, enum: [environment, auth.json, none] }
+        provider: { type: string, description: "Provider id the credential belongs to" }
+        profile: { type: string, description: "Login profile recorded at sign-in" }
+        path: { type: string, description: "Credential file, when one exists" }
+        configured: { type: boolean, description: "A credential exists, whatever the provider said about it" }
+        validity:
+          type: string
+          enum: [valid, invalid, unavailable, missing]
+          description: "The provider's verdict; unavailable means it could not be reached"
+        loginCommand: { type: string, description: "The command that changes this state" }
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string }
