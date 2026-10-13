@@ -92,6 +92,21 @@ function result(value: unknown, tokens = 1) {
 	};
 }
 
+function initialProgress(runId: string): WorkflowProgress {
+	return {
+		schemaVersion: 1,
+		runId,
+		name: "test",
+		status: "running",
+		startedAt: 0,
+		updatedAt: 0,
+		agents: [],
+		completedAgents: 0,
+		totalAgents: 0,
+		spentTokens: 0,
+	};
+}
+
 test("explicit concurrency cannot exceed the machine ceiling", () => {
 	expect(clampWorkflowConcurrency(22, 10)).toBe(8);
 	expect(clampWorkflowConcurrency(22, 32)).toBe(16);
@@ -205,18 +220,7 @@ test("a failing terminal progress write never replaces the run's terminal error"
 		runId: "progress_write_failure",
 		name: "test",
 		journal,
-		progress: new TerminalFailingProgress(paths.progressPath, {
-			schemaVersion: 1,
-			runId: "progress_write_failure",
-			name: "test",
-			status: "running",
-			startedAt: 0,
-			updatedAt: 0,
-			agents: [],
-			completedAgents: 0,
-			totalAgents: 0,
-			spentTokens: 0,
-		}),
+		progress: new TerminalFailingProgress(paths.progressPath, initialProgress("progress_write_failure")),
 		runner: async () => {
 			throw new Error("provider exploded");
 		},
@@ -226,6 +230,59 @@ test("a failing terminal progress write never replaces the run's terminal error"
 	expect(entries.filter((entry) => entry.status === "failed")).toMatchObject([
 		{ status: "failed", error: expect.stringContaining("provider exploded") },
 	]);
+});
+
+test("a failed progress write while recording a node keeps the failure classified once", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "node_record_progress_failure");
+	// State mutates before the write, so the agent is already failed when the write
+	// rejects. The run must still report that node once, not also as a callback error.
+	class LateFailingProgress extends WorkflowProgressStore {
+		failWrites = false;
+		override async update(
+			patch: Partial<WorkflowProgress> & { agent?: WorkflowProgressAgent },
+		): Promise<WorkflowProgress> {
+			const snapshot = await super.update(patch);
+			if (this.failWrites) throw new Error("progress disk full");
+			return snapshot;
+		}
+	}
+	const progress = new LateFailingProgress(paths.progressPath, initialProgress("node_record_progress_failure"));
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "node_record_progress_failure",
+		name: "test",
+		journal: new WorkflowJournal(paths),
+		progress,
+		runner: async () => {
+			progress.failWrites = true;
+			return { status: "failed", errorMessage: "provider failed" };
+		},
+	});
+	const output = await runtime.runScript('return await parallel([() => agent("bad")]);', null);
+	expect(output).toMatchObject({ status: "failed", summary: { total: 1, completed: 0, failed: 1 } });
+	expect(output.taskFailures).toBeUndefined();
+	expect(output.failures?.[0]?.error?.message).toContain("provider failed");
+});
+
+test("a failed journal append while recording a node keeps the failure classified once", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "node_record_journal_failure");
+	await mkdir(paths.runDir, { recursive: true });
+	// A directory at the journal path makes every append fail while the script copy
+	// and progress writes still work.
+	await mkdir(paths.journalPath, { recursive: true });
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "node_record_journal_failure",
+		name: "test",
+		journal: new WorkflowJournal(paths),
+		runner: async () => ({ status: "failed", errorMessage: "provider failed" }),
+	});
+	const output = await runtime.runScript('return await parallel([() => agent("bad")]);', null);
+	expect(output).toMatchObject({ status: "failed", summary: { total: 1, completed: 0, failed: 1 } });
+	expect(output.taskFailures).toBeUndefined();
+	expect(output.failures?.[0]?.error?.message).toContain("provider failed");
 });
 
 test("shell interpolation errors before agent() cannot become a successful zero-call workflow", async () => {

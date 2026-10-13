@@ -592,7 +592,7 @@ export class WorkflowRuntime {
 						attempt,
 						errorMessage(error),
 						rateLimitRetries,
-					);
+					).catch(() => undefined);
 					throw error;
 				}
 				if (raw.status === "failed" || raw.status === "aborted") {
@@ -606,7 +606,7 @@ export class WorkflowRuntime {
 						attempt,
 						failure,
 						rateLimitRetries,
-					);
+					).catch(() => undefined);
 					throw new Error(failure);
 				}
 				const value = normalizeWorkflowAgentValue(raw);
@@ -624,7 +624,7 @@ export class WorkflowRuntime {
 						attempt,
 						lastErrors.join("; "),
 						rateLimitRetries,
-					);
+					).catch(() => undefined);
 					throw new WorkflowSchemaError(lastErrors, attempt);
 				}
 				const finalValue = normalizedOptions.schema ? validation.value : value;
@@ -667,6 +667,14 @@ export class WorkflowRuntime {
 				errorMessage(error) +
 				(cleanupIncomplete ? "; runner did not settle after cancellation; its shared slot remains reserved" : "");
 			const rateLimited = isRateLimitError(message) && !isTerminalQuotaError(message);
+			// Classify before recording anything. A failed journal or progress write must
+			// not replace the node's own error, and the marker has to exist before the
+			// bridge can ask for it, or parallel()/pipeline() reports this node failure a
+			// second time as a callback failure.
+			const propagated = error instanceof Error ? error : new Error(errorMessage(error));
+			this.nodeErrors.add(propagated);
+			// Recording is best effort: the node already failed, and a disk error must not
+			// turn that into a different terminal error for the run.
 			if (!this.recordedFailures.has(seq)) {
 				await this.appendFailure(
 					seq,
@@ -677,7 +685,7 @@ export class WorkflowRuntime {
 					schemaAttempt,
 					message,
 					rateLimitRetries,
-				);
+				).catch(() => undefined);
 			}
 			if (rateLimited) {
 				this.semaphore.throttle(requestEpoch, 1000);
@@ -709,14 +717,12 @@ export class WorkflowRuntime {
 					usageTokens: workflowUsageTokens(totalUsage),
 				},
 				spentTokens: this.budget.spent(),
-			});
+			}).catch(() => undefined);
 			if (error instanceof WorkflowBudgetExceeded)
 				this.track("workflow_budget_exceeded", {
 					spent_tokens: error.spentTokens,
 					requested_tokens: error.requestedTokens,
 				});
-			const propagated = error instanceof Error ? error : new Error(errorMessage(error));
-			this.nodeErrors.add(propagated);
 			throw propagated;
 		} finally {
 			releaseShared?.();

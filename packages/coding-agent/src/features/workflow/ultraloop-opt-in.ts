@@ -45,12 +45,40 @@ const TRIGGER_PHRASES: readonly RegExp[] = [
 	/\borchestrate (?:this|it) with sub-?agents\b/iu,
 ];
 const OPT_IN_PATTERNS: readonly RegExp[] = [KEYWORD, ...TRIGGER_PHRASES];
-// An explicit request to launch multiple agents is orchestration consent too;
-// a bare mention, a question about agents, or a negated command is not.
-const COUNTED_AGENT_REQUESTS = [
-	/(?:^|[，。！？;\n])\s*(?:(?:请帮我|帮我|请|我想)\s*)?(?:启动|开启|开|创建|派出)\s*(\d+|[一二两三四五六七八九十百千]+)\s*个?\s*(?:子\s*agents?|sub-?agents?|子代理)/iu,
-	/(?:^|[.!?;\n])\s*(?:please\s+)?(?:spawn|start|launch)\s+(\d+)\s+(?:sub-?agents|agents)\b/iu,
-];
+// An explicit request to launch several agents is orchestration consent too. The
+// phrase may sit anywhere in the message, so "麻烦开3个子agent查一下" counts while
+// "先看代码" alone does not.
+const COUNTED_AGENT_LAUNCH =
+	/(?:启动|开启|开|创建|派出|spawn|start|launch|run|create)\s*(\d+|[０-９]+|[一二两三四五六七八九十百千]+)\s*个?\s*(?:子\s*agents?|sub-?agents?|子代理|agents?)/iu;
+/** "一/零/半" style counts are not a fan-out request. */
+const SINGULAR_COUNT = /^(?:[一壹零〇半]|1)$/u;
+/** Asking about a request (cost, feasibility, how) is not consent to perform it. */
+const META_QUESTION =
+	/(?:多少钱|多少成本|成本|费用|划算|可行|是否可以|是否|是不是|会不会|该不该|什么意思|怎么|如何|为什么|为啥|how much|what does|is it|should i|can i|do i|how do i|how to|why)/iu;
+/** Refusal or deliberation cancels a counted request anywhere in the message. */
+const REFUSAL = /(?:不要|别|不能|不可以|无需|不需要|不准|禁止|还是|不如|算了)/u;
+const CLAUSE_BOUNDARY = /[，,。.;；、!！?？\n]/u;
+
+/**
+ * Returns the matched counted fan-out request, or undefined when this turn carries
+ * no such signal. A question about launching agents ("开10个子agent要多少钱？",
+ * "Launch 10 agents?") and a negated or deliberated command are not consent.
+ */
+function detectCountedAgentRequest(prompt: string): string | undefined {
+	if (REFUSAL.test(prompt)) return undefined;
+	const match = COUNTED_AGENT_LAUNCH.exec(prompt);
+	if (!match?.[1]) return undefined;
+	const count = match[1].replace(/[０-９]/gu, (digit) => String.fromCharCode(digit.charCodeAt(0) - 0xfee0));
+	if (/^\d+$/u.test(count) ? Number(count) <= 1 : SINGULAR_COUNT.test(count)) return undefined;
+	const after = prompt.slice(match.index + match[0].length);
+	// "Launch 10 agents?" asks about launching them; a request keeps going afterwards.
+	if (/^\s*[?？]/u.test(after)) return undefined;
+	const before = prompt.slice(0, match.index);
+	const clauseBefore = before.split(CLAUSE_BOUNDARY).at(-1) ?? "";
+	const clauseAfter = after.split(CLAUSE_BOUNDARY)[0] ?? "";
+	if (META_QUESTION.test(clauseBefore) || META_QUESTION.test(clauseAfter)) return undefined;
+	return match[0].trim();
+}
 
 /**
  * Claude Code-style per-turn token target: "+500k" or "+1.5m" anywhere in the
@@ -64,11 +92,7 @@ export function detectUltraloopOptIn(prompt: string): string | undefined {
 		const match = prompt.match(re)?.[0];
 		if (match !== undefined) return match;
 	}
-	for (const re of COUNTED_AGENT_REQUESTS) {
-		const match = prompt.match(re);
-		if (match?.[1] && (/^\d+$/.test(match[1]) ? Number(match[1]) > 1 : match[1] !== "一")) return match[0].trim();
-	}
-	return undefined;
+	return detectCountedAgentRequest(prompt);
 }
 
 /** Returns the "+500k"-style token target for this turn, or undefined. */

@@ -19,8 +19,16 @@ test("explicit counted fan-out requests grant workflow consent without the ultra
 		"请启动十个子代理",
 		"launch 10 subagents",
 		"帮我创建 2 个子 agent",
+		// The request may sit anywhere in the message.
+		"麻烦开3个子agent查一下",
+		"先看代码，然后开10个子agent",
+		"帮我开10个agent",
+		"启动10个agent",
+		"Can you spawn 5 subagents to review this PR?",
+		"I'd like you to launch 10 subagents for the audit",
+		"run 10 subagents in parallel",
 	]) {
-		expect(detectUltraloopOptIn(prompt)).toBeDefined();
+		expect(detectUltraloopOptIn(prompt), prompt).toBeDefined();
 	}
 	for (const prompt of [
 		"不要开10个子agent",
@@ -30,8 +38,25 @@ test("explicit counted fan-out requests grant workflow consent without the ultra
 		"开零个子agent",
 		"开半个子agent",
 		"开负1个子agent",
+		"开２０个子agent要多少钱？",
 	]) {
-		expect(detectUltraloopOptIn(prompt)).toBeUndefined();
+		expect(detectUltraloopOptIn(prompt), prompt).toBeUndefined();
+	}
+});
+
+test("asking about a counted fan-out is not consent to run one", () => {
+	for (const prompt of [
+		"开10个子agent要多少钱？",
+		"开10个子agent可行吗？",
+		"开10个子agent是不是太多了？",
+		"开10个子agent，还是先用subagent工具吧",
+		"Launch 10 agents? That seems excessive.",
+		"launch 10 agents?",
+		"怎么开10个子agent",
+		"how do i launch 10 subagents",
+		"开10个子agent怎么随机sleep",
+	]) {
+		expect(detectUltraloopOptIn(prompt), prompt).toBeUndefined();
 	}
 });
 
