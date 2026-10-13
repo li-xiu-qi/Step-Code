@@ -533,7 +533,7 @@
         <path d="M2.75 3h6l6.5 6.5-5.75 5.75L3 8.75z" />
         <circle cx="6" cy="6.25" r="1" fill="currentColor" stroke="none" />
       </symbol>
-    </svg>
+    <symbol id="i-clock" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="9" cy="9" r="6.5"/><path d="M9 5.5V9l2.5 1.5"/></symbol><symbol id="i-puzzle" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M6.5 2.5a1.5 1.5 0 0 1 3 0c0 .6-.4.9-.4 1.5h2.4a1 1 0 0 1 1 1v2.4c.6 0 .9-.4 1.5-.4a1.5 1.5 0 0 1 0 3c-.6 0-.9-.4-1.5-.4v2.4a1 1 0 0 1-1 1H9.1c0 .6.4.9.4 1.5a1.5 1.5 0 0 1-3 0c0-.6.4-.9.4-1.5H4.5a1 1 0 0 1-1-1V8.9c-.6 0-.9.4-1.5.4a1.5 1.5 0 0 1 0-3c.6 0 .9.4 1.5.4V5a1 1 0 0 1 1-1h2.4c0-.6-.4-.9-.4-1.5z"/></symbol></svg>
     <div class="app">
       <aside class="sidebar">
         <div class="brand-row">
@@ -561,6 +561,18 @@
             </svg>
             <span data-i18n="newConversation">新建会话</span>
           </button>
+          <button class="sidebar-action" id="cronButton" type="button" title="定时任务">
+            <svg class="icon icon--md" aria-hidden="true">
+              <use href="#i-clock" />
+            </svg>
+            <span>定时任务</span>
+          </button>
+          <button class="sidebar-action" id="marketButton" type="button" title="插件市场">
+            <svg class="icon icon--md" aria-hidden="true">
+              <use href="#i-puzzle" />
+            </svg>
+            <span>插件市场</span>
+          </button>
           <button
             class="sidebar-search"
             id="searchPlaceholder"
@@ -576,7 +588,8 @@
         </nav>
 
         <section class="conversation-list" aria-label="会话列表">
-          <div class="view-tabs">
+          <div class="list-header-row">
+        <div class="view-tabs">
             <button
               class="view-tab active"
               type="button"
@@ -594,6 +607,15 @@
               分组
             </button>
           </div>
+          <div class="list-header-actions">
+            <button class="icon-button list-mode-button" id="addWorkspace" type="button" data-tooltip="添加工作区" aria-label="添加工作区" aria-keyshortcuts="Alt+Meta+O">
+              <svg class="icon icon--sm" aria-hidden="true"><use href="#i-folderPlus" /></svg>
+            </button>
+            <button class="icon-button list-mode-button" id="archiveToggle" type="button" title="查看归档" aria-label="查看归档">
+              <svg class="icon icon--sm" aria-hidden="true"><use href="#i-archive" /></svg>
+            </button>
+          </div>
+        </div>
           <div class="tag-filter" id="tagFilter" hidden>
             <button class="filter-chip" id="tagFilterChip" type="button">
               <span class="tag-diamond" id="tagFilterDiamond"></span>
@@ -602,39 +624,6 @@
             </button>
           </div>
           <div id="projectView">
-            <div class="list-heading">
-              <span id="listHeading" data-i18n="conversations">会话</span>
-              <span class="list-actions">
-                <button
-                  class="icon-button list-mode-button list-action"
-                  id="addWorkspace"
-                  type="button"
-                  data-tooltip="添加工作区"
-                  aria-label="添加工作区"
-                  aria-keyshortcuts="Alt+Meta+O"
-                >
-                  <svg class="icon icon--sm" aria-hidden="true">
-                    <use href="#i-folderPlus" />
-                  </svg>
-                </button>
-                <button
-                  class="icon-button list-mode-button"
-                  id="archiveToggle"
-                  type="button"
-                  title="查看归档"
-                  aria-label="查看归档"
-                >
-                  <svg class="icon icon--sm" aria-hidden="true">
-                    <use href="#i-archive" />
-                  </svg>
-                </button>
-              </span>
-            </div>
-            <div id="projectGroups"></div>
-            <div class="recent-group" id="recentGroup">
-              <div class="project-label" data-i18n="recent">最近</div>
-              <div id="recentTasks"></div>
-            </div>
           </div>
           <div class="grouped-view" id="groupedView" hidden></div>
         </section>
@@ -671,6 +660,7 @@
           </div>
           <div class="file-tree-body" id="fileTreeBody" role="tree"></div>
         </div>
+
 
         <div class="user-area">
           <div class="user-popover" id="userPopover" hidden>
@@ -829,6 +819,28 @@
           <div class="banner-detail" id="bannerDetail">
             <div class="task-panel-body" id="taskPanelBody"></div>
           </div>
+        </div>
+        <div class="market-view" id="cronView">
+          <header class="market-header">
+            <strong>定时任务</strong>
+            <button class="btn-primary" id="cronNew" type="button">新建任务</button>
+            <button class="icon-button" id="cronClose" type="button" title="返回会话" aria-label="返回会话">
+              <svg class="icon icon--md" aria-hidden="true"><use href="#i-close" /></svg>
+            </button>
+          </header>
+          <div class="market-grid" id="cronGrid"></div>
+          <footer class="market-note">能力已就绪:会话内直接说「每天 9 点跑依赖巡检」即可创建 · 面板管理接口排批 1 · 当前为演示数据</footer>
+        </div>
+        <div class="market-view" id="marketView">
+          <header class="market-header">
+            <strong>插件市场</strong>
+            <input type="search" id="marketSearch" placeholder="搜索插件" />
+            <button class="icon-button" id="marketClose" type="button" title="返回会话" aria-label="返回会话">
+              <svg class="icon icon--md" aria-hidden="true"><use href="#i-close" /></svg>
+            </button>
+          </header>
+          <div class="market-grid" id="marketGrid"></div>
+          <footer class="market-note">即将上线 · 内核插件机制已就绪(manifest + 安装器,兼容 Claude 生态清单)· 当前为演示数据</footer>
         </div>
         <div class="stream" id="stream">
           <div class="stream-inner" id="streamInner">

@@ -895,9 +895,6 @@ function renderSessionLists() {
     )
   }
   $("#recentGroup").hidden = recent.length === 0
-  $("#listHeading").textContent = state.showArchived
-    ? t("archivedConversations")
-    : t("conversations")
   $("#archiveToggle").classList.toggle("active", state.showArchived)
   $("#archiveToggle").title = state.showArchived
     ? t("conversations")
@@ -3917,3 +3914,61 @@ document.addEventListener("keydown", (event) => {
     showError(error.message)
   }
 })()
+
+// ===== 侧栏入口:定时任务 / 插件市场(demo 面板) =====
+const CRON_DEMO = [
+  { title: "依赖过时巡检", desc: "每天 09:00 · step-harness-web · 下次:明早 09:00", meta: "cron · 0 9 * * *", on: true },
+  { title: "站会摘要生成", desc: "工作日 09:30 · step-harness · 下次:周一 09:30", meta: "cron · 30 9 * * 1-5", on: true },
+  { title: "BMK 回归", desc: "每周一 10:00 · step-harness · 下次:周一 10:00", meta: "cron · 0 10 * * 1", on: false },
+];
+
+const MARKET_DEMO = [
+  { title: "StepPage", desc: "把静态网站一键发布上线,会话内说「发布这个页面」即可,自动生成访问链接。", meta: "官方 · 预装", on: true },
+  { title: "search-web", desc: "联网搜索工具:让会话可以检索网页并引用来源,回答时效性问题。", meta: "官方 · 工具", on: true },
+  { title: "MCP Servers", desc: "Model Context Protocol 接入:把数据库、浏览器、内部系统挂成模型可调用的工具。", meta: "生态 · 接入", on: false },
+  { title: "QuickJS Workflows", desc: "用 TypeScript 脚本编排多智能体并行执行,沙箱隔离、可重放。", meta: "官方 · 内核能力", on: true },
+  { title: "Skills", desc: "技能包:把团队约定与操作手册变成模型可加载的技能目录。", meta: "官方 · 内核能力", on: true },
+  { title: "Browser Bridge", desc: "受审批的浏览器操作:打开页面、点击、读取内容(Computer Use 一期)。", meta: "规划中 · 桌面端", on: false },
+];
+
+function cronCard(item) {
+  return `<div class="market-card"><div class="card-head"><span class="card-icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-clock"/></svg></span><span class="card-title">${escapeHtml(item.title)}</span></div><div class="card-desc">${escapeHtml(item.desc)}</div><div class="card-foot"><span class="card-meta">${escapeHtml(item.meta)}</span><button class="card-action${item.on ? " installed" : ""}" type="button" ${item.on ? "disabled" : ""}>${item.on ? "已启用" : "已暂停"}</button></div></div>`;
+}
+
+function openCronView() {
+  closeMarketView();
+  $("#cronGrid").innerHTML = CRON_DEMO.map(cronCard).join("");
+  $("#cronView").classList.add("open");
+}
+
+function closeCronView() {
+  $("#cronView").classList.remove("open");
+}
+
+function marketCard(item) {
+  return `<div class="market-card"><div class="card-head"><span class="card-icon"><svg class="icon icon--md" aria-hidden="true"><use href="#i-puzzle"/></svg></span><span class="card-title">${escapeHtml(item.title)}</span></div><div class="card-desc">${escapeHtml(item.desc)}</div><div class="card-foot"><span class="card-meta">${escapeHtml(item.meta)}</span><button class="card-action${item.on ? " installed" : ""}" type="button" ${item.on ? "disabled" : ""}>${item.on ? "已启用" : "安装"}</button></div></div>`;
+}
+
+function openMarketView() {
+  closeCronView();
+  $("#marketGrid").innerHTML = MARKET_DEMO.map(marketCard).join("");
+  $("#marketView").classList.add("open");
+}
+
+function closeMarketView() {
+  $("#marketView").classList.remove("open");
+}
+
+$("#cronButton")?.addEventListener("click", openCronView);
+$("#marketButton")?.addEventListener("click", openMarketView);
+$("#cronClose")?.addEventListener("click", closeCronView);
+$("#cronNew")?.addEventListener("click", () => { closeCronView(); $("#newSession")?.click(); });
+$("#marketClose")?.addEventListener("click", closeMarketView);
+$("#marketSearch")?.addEventListener("input", (event) => {
+  const needle = String(event.target.value ?? "").trim().toLowerCase();
+  $("#marketGrid").innerHTML = MARKET_DEMO
+    .filter((item) => !needle || item.title.toLowerCase().includes(needle) || item.desc.toLowerCase().includes(needle))
+    .map(marketCard)
+    .join("");
+});
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") { closeCronView(); closeMarketView(); } });

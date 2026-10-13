@@ -279,28 +279,39 @@ select { appearance: none; }
 }
 
 .conversation-list { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 8px 16px; }
-.view-tabs {
+.list-header-row {
   position: sticky;
   top: 0;
   z-index: 5;
   display: flex;
-  gap: 2px;
-  margin: 2px 2px 10px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 2px 8px;
   padding: 2px;
-  border-radius: var(--radius-panel);
-  background: var(--hover);
   box-shadow: 0 -6px 0 6px var(--sidebar);
 }
+.view-tabs {
+  display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: var(--hover);
+}
 .view-tab {
-  flex: 1;
-  min-height: var(--control-h-md);
-  border-radius: var(--radius-control);
+  flex: none;
+  min-height: 20px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 6px;
   color: var(--ink-3);
 }
+.list-header-actions { display: flex; gap: 2px; margin-left: auto; }
 .view-tab.active {
   background: var(--surface);
   color: var(--ink);
-  box-shadow: 0 1px 4px rgb(0 0 0 / 8%);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  font-weight: 500;
 }
 .tag-filter { padding: 0 4px 8px; }
 .filter-chip {
@@ -1479,3 +1490,36 @@ select { appearance: none; }
 .usage-recent .row:hover { background: var(--hover); }
 .usage-recent .row .n { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .usage-recent .row .v { flex: none; opacity: 0.7; }
+
+.overlay-list { flex: 1; overflow: auto; padding: 4px 8px; }
+.overlay-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+.overlay-item:hover { background: var(--hover); }
+.overlay-item .item-icon { flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; background: var(--hover); }
+.overlay-item .item-body { flex: 1; min-width: 0; }
+.overlay-item .item-title { font-weight: 500; }
+.overlay-item .item-sub { font-size: 11px; opacity: 0.65; }
+.overlay-item .item-state { flex: none; font-size: 11px; padding: 1px 8px; border: 1px solid var(--line); border-radius: 999px; opacity: 0.8; }
+.item-state.on { color: #2fa96e; border-color: #2fa96e; }
+.overlay-note { padding: 10px 12px; font-size: 11px; opacity: 0.6; border-top: 1px solid var(--line); }
+
+/* ===== 插件市场:中栏视图 ===== */
+.market-view { position: absolute; inset: 0; z-index: 15; display: none; flex-direction: column; background: var(--canvas); }
+.market-view.open { display: flex; }
+.market-header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--line); flex: none; }
+.market-header strong { font-size: 15px; }
+.market-header input { flex: 1; max-width: 320px; margin-left: auto; }
+.market-grid { flex: 1; overflow: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; align-content: start; padding: 18px 20px; }
+.market-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.market-card:hover { border-color: var(--line-strong); }
+.market-card .card-head { display: flex; align-items: center; gap: 10px; }
+.market-card .card-icon { flex: none; display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; background: var(--surface-soft); border: 1px solid var(--line); }
+.market-card .card-title { font-weight: 600; font-size: 13.5px; }
+.market-card .card-desc { font-size: 12px; opacity: 0.7; line-height: 1.55; flex: 1; }
+.market-card .card-foot { display: flex; align-items: center; justify-content: space-between; }
+.market-card .card-meta { font-size: 11px; opacity: 0.55; }
+.market-card .card-action { font-size: 12px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: transparent; cursor: pointer; }
+.market-card .card-action.installed { color: #2fa96e; border-color: #2fa96e; cursor: default; }
+.market-note { padding: 10px 20px; font-size: 11px; opacity: 0.6; border-top: 1px solid var(--line); flex: none; }
+
+.btn-primary { margin-left: auto; flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 5px 14px; border: 0; border-radius: 999px; background: var(--ink); color: var(--canvas); font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.btn-primary:hover { opacity: 0.88; }
