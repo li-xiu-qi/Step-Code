@@ -1,5 +1,15 @@
 # Development Rules
 
+## Commit attribution
+
+- Keep the Git author and committer as the human contributor's verified GitHub identity.
+- AI tools may assist with implementation, but they must not be added as commit co-authors.
+- Do not add `Co-authored-by` or `Co-Authored-By` trailers for Claude, Claude Code, Codex, ChatGPT, OpenAI, Anthropic, or another AI client.
+- Do not mention the client used to create a change in the commit message solely for attribution.
+- Before creating or amending a commit, inspect its metadata and remove any AI-client attribution trailer.
+
+This policy applies to commit metadata. Documentation may mention AI products when that is relevant to the product or feature being documented.
+
 ## Architecture
 
 `step-harness` is a pnpm monorepo. StepCode is assembled from layered packages
@@ -212,12 +222,14 @@ a wide session when checking layout.
 **Step binary versioning**: Step releases use the product tag `vMAJOR.MINOR.PATCH`. The package versions may remain independent because packages are not published by this project.
 
 1. **Local binary smoke test**: build the standalone Step bundle and smoke test the current-platform binary outside the repo:
+
    ```bash
    node infra/release/release-bundle.mjs --dry-run --version v0.1.0
    ./scripts/build-binaries.sh --product step --offline-model-data --platform linux-x64 --out /tmp/stepcode-release
    /tmp/stepcode-release/step --help
    /tmp/stepcode-release/step --version
    ```
+
    Verify the binary starts, reports the tag-derived version, loads native TUI resources, and completes a smoke prompt with the intended Step provider. Failures are release blockers unless the user explicitly accepts the risk.
 
 2. **Public-source boundary**: the public repository only builds local artifacts. Internal tagging, binary publication, object-store upload, and release announcement jobs are intentionally kept outside this source tree.

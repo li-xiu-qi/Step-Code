@@ -1,5 +1,3 @@
-@AGENTS.md
-
 # Claude Code instructions
 
 Follow the repository rules in `AGENTS.md`.
