@@ -483,9 +483,17 @@ server.listen(port, bindHost, () => {
 	console.log(formatStartupBanner({ port, token: auth.getLaunchToken(), version: resolveStepCodeVersion().value }));
 });
 
+// Installing signal handlers replaces Node's default exit, so shutdown must end
+// the process itself: open SSE streams and keep-alive sockets would otherwise
+// keep server.close() pending forever.
 const shutdown = async (): Promise<void> => {
-	await store.close();
 	server.close();
+	server.closeAllConnections();
+	try {
+		await store.close();
+	} finally {
+		process.exit(0);
+	}
 };
 process.once("SIGINT", () => void shutdown());
 process.once("SIGTERM", () => void shutdown());

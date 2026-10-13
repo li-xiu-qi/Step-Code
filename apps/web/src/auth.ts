@@ -16,7 +16,6 @@ import { dirname } from "node:path";
  * is; this module only reads and writes the path it is handed.
  */
 
-
 function loadOrCreateSecret(path: string): Buffer {
 	try {
 		const existing = readFileSync(path, "utf8").trim();

@@ -148,8 +148,14 @@ try {
 	}
 	console.log("web runtime smoke passed: auth/logout, v3 session, policy, rename, archive, files/directories, SSE, 50 reads");
 } finally {
-	child.kill("SIGTERM");
-	await new Promise((resolve) => child.once("exit", resolve));
+	if (child.exitCode === null) {
+		const exited = new Promise((resolve) => child.once("exit", resolve));
+		child.kill("SIGTERM");
+		// A server that ignores SIGTERM must not hang the pre-commit hook.
+		const forceKill = setTimeout(() => child.kill("SIGKILL"), 5_000);
+		await exited;
+		clearTimeout(forceKill);
+	}
 	await rm(cwd, { recursive: true, force: true });
 	await rm(agentDir, { recursive: true, force: true });
 }
