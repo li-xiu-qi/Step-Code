@@ -104,6 +104,44 @@ test("optional provider concurrency ignores blank and invalid environment values
 	expect(configuredWorkflowConcurrencyLimit(" 8 ")).toBe(8);
 });
 
+test("a long server Retry-After cannot freeze the shared admission window", async () => {
+	// A node's own retry honors Retry-After verbatim, but the admission window is
+	// process-wide, so an hour-long (or far-future-date) cooldown must not stall
+	// unrelated workflows with no timeout and no error.
+	vi.useFakeTimers();
+	const semaphore = new WorkflowSemaphore(4);
+	try {
+		semaphore.throttle(semaphore.epoch, 3_600_000);
+		let admitted = false;
+		const acquired = semaphore.acquire().then((release) => {
+			admitted = true;
+			return release;
+		});
+		await vi.advanceTimersByTimeAsync(29_000);
+		expect(admitted).toBe(false);
+		await vi.advanceTimersByTimeAsync(2_000);
+		const release = await acquired;
+		expect(admitted).toBe(true);
+		release();
+	} finally {
+		semaphore.dispose();
+		vi.useRealTimers();
+	}
+});
+
+test("an invalid throttle delay neither blocks admission nor schedules a far-future timer", async () => {
+	vi.useFakeTimers();
+	const semaphore = new WorkflowSemaphore(2);
+	try {
+		for (const delay of [Number.NaN, Number.POSITIVE_INFINITY, -1]) semaphore.throttle(semaphore.epoch, delay);
+		const release = await semaphore.acquire();
+		release();
+	} finally {
+		semaphore.dispose();
+		vi.useRealTimers();
+	}
+});
+
 test("nested workflow callback failures propagate to the owning run", async () => {
 	const child = 'return await parallel([() => agent("ok"), () => { throw new ReferenceError("missingRef"); }]);';
 	const { runtime } = runtimeAt(await workspace(), async () => result("ok"), {

@@ -91,6 +91,18 @@ export function clampWorkflowAgentLimit(value: number | undefined): number {
 	return Math.max(1, Math.min(DEFAULT_MAX_AGENTS, Math.floor(value)));
 }
 
+/**
+ * Upper bound for an admission cooldown caused by a 429.
+ *
+ * A server's `Retry-After` can be hours, or a far-future HTTP date, and the node's
+ * own retry deliberately honors it verbatim. The admission window is shared by every
+ * workflow in the process and its queue time is excluded from node timeouts, so an
+ * unbounded cooldown would stall unrelated workflows indefinitely with no error and
+ * no timeout. The adaptive cap reduction below is what actually protects the provider;
+ * this bound only decides how long the window pauses before probing again.
+ */
+const MAX_THROTTLE_COOLDOWN_MS = 30_000;
+
 /** FIFO semaphore used by agent() so VM scripts cannot fan out unbounded work. */
 export class WorkflowSemaphore {
 	private limit: number;
@@ -135,7 +147,8 @@ export class WorkflowSemaphore {
 			this.limit = Math.max(1, Math.floor(this.limit * 0.75));
 			this.generation++;
 		}
-		this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + delayMs);
+		const cooldownMs = Number.isFinite(delayMs) ? Math.max(0, Math.min(MAX_THROTTLE_COOLDOWN_MS, delayMs)) : 0;
+		this.cooldownUntil = Math.max(this.cooldownUntil, Date.now() + cooldownMs);
 		this.scheduleDrain();
 	}
 
