@@ -65,6 +65,19 @@ describe("provider request retries", () => {
 		expect(request).toHaveBeenCalledTimes(1);
 	});
 
+	it("keeps the server's 429 delay when the cap rejects it, but not for other statuses", async () => {
+		const capped = async (status: number): Promise<unknown> => {
+			const request = vi
+				.fn<() => Promise<string>>()
+				.mockRejectedValue(providerError(status, { "retry-after": "120" }));
+			return retryProviderRequest(request, { maxRetries: 1, maxRetryDelayMs: 1000 }).catch(
+				(error: unknown) => error,
+			);
+		};
+		expect(providerRetryAfterMs(await capped(429))).toBe(120_000);
+		expect(providerRetryAfterMs(await capped(503))).toBeUndefined();
+	});
+
 	it("allows disabling the provider-requested retry delay cap", async () => {
 		vi.useFakeTimers();
 		const request = vi

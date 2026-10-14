@@ -412,6 +412,10 @@ export class WorkflowRuntime {
 		let totalUsage: WorkflowUsage = emptyWorkflowUsage();
 		let rateLimitRetries = 0;
 		let cleanupIncomplete = false;
+		let timedOut = false;
+		// Only text the runner itself reported as the failure can indicate congestion.
+		// Agent output, node labels and ids are never classified.
+		let providerFailure: string | undefined;
 		let schemaAttempt = 0;
 		let requestEpoch = this.semaphore.epoch;
 		let sharedEpoch = shared.epoch;
@@ -476,6 +480,43 @@ export class WorkflowRuntime {
 				let timeout: ReturnType<typeof setTimeout> | undefined;
 				let runnerPromise: Promise<WorkflowAgentRunResult> | undefined;
 				let cancelAttempt: (() => void) | undefined;
+				let settling: Promise<WorkflowAgentRunResult | undefined> | undefined;
+				// After cancellation the runner gets a bounded grace to settle. Returns its
+				// late result so the usage it reports can still be accounted.
+				const settleRunner = (): Promise<WorkflowAgentRunResult | undefined> => {
+					settling ??= (async () => {
+						if (!runnerPromise || !attemptController.signal.aborted) return undefined;
+						let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+						try {
+							const settled = await Promise.race([
+								runnerPromise.then(
+									(value) => ({ value }),
+									() => ({ value: undefined }),
+								),
+								new Promise<undefined>((resolve) => {
+									cleanupTimer = setTimeout(() => resolve(undefined), this.runnerCleanupTimeoutMs);
+								}),
+							]);
+							if (settled) return settled.value;
+							// An injected runner violated the cancellation contract. Keep its
+							// shared slot reserved until it settles; never admit replacement
+							// work on top of an operation that may still be using the backend.
+							cleanupIncomplete = true;
+							const retainedLease = acquireWorkflowAdmission(this.concurrency.ceiling);
+							const retainedRelease = releaseShared;
+							releaseShared = undefined;
+							const done = (): void => {
+								retainedRelease?.();
+								retainedLease.release();
+							};
+							void runnerPromise.then(done, done);
+							return undefined;
+						} finally {
+							if (cleanupTimer) clearTimeout(cleanupTimer);
+						}
+					})();
+					return settling;
+				};
 				try {
 					const cancelled = new Promise<never>((_resolve, reject) => {
 						cancelAttempt = () =>
@@ -483,6 +524,7 @@ export class WorkflowRuntime {
 						attemptController.signal.addEventListener("abort", cancelAttempt, { once: true });
 						if (attemptController.signal.aborted) cancelAttempt();
 						timeout = setTimeout(() => {
+							timedOut = true;
 							attemptController.abort(
 								new Error(
 									`Workflow agent ${label} timed out after ${this.agentTimeoutMs}ms (execution only; queue time excluded)`,
@@ -506,6 +548,10 @@ export class WorkflowRuntime {
 							if (event.type === "succeeded") {
 								this.semaphore.succeeded(requestEpoch);
 								shared.succeeded(sharedEpoch);
+								// The next request in this turn (a resample after leaked tool-call
+								// markup) has no "started" event of its own.
+								requestEpoch = this.semaphore.epoch;
+								sharedEpoch = shared.epoch;
 							}
 							if (event.type === "rate_limit") {
 								rateLimitRetries++;
@@ -531,6 +577,19 @@ export class WorkflowRuntime {
 					});
 					raw = await Promise.race([runnerPromise, cancelled]);
 				} catch (error: unknown) {
+					// A timed-out or aborted attempt still spent tokens. The runner reports
+					// them when it settles, after the race has already been decided.
+					const late = await settleRunner();
+					if (late) {
+						const lateUsage = normalizeUsage(late.usage);
+						totalUsage = mergeWorkflowUsage(totalUsage, lateUsage);
+						try {
+							this.budget.consume(lateUsage);
+						} catch (budgetError: unknown) {
+							if (budgetError instanceof WorkflowBudgetExceeded) this.budgetError ??= budgetError;
+						}
+					}
+					if (!attemptController.signal.aborted) providerFailure = errorMessage(error);
 					await this.appendFailure(
 						seq,
 						callHash,
@@ -546,36 +605,7 @@ export class WorkflowRuntime {
 					if (timeout) clearTimeout(timeout);
 					if (cancelAttempt) attemptController.signal.removeEventListener("abort", cancelAttempt);
 					parentSignal?.removeEventListener("abort", relayAbort);
-					if (attemptController.signal.aborted && runnerPromise) {
-						let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
-						try {
-							const settled = await Promise.race([
-								runnerPromise.then(
-									() => true,
-									() => true,
-								),
-								new Promise<false>((resolve) => {
-									cleanupTimer = setTimeout(() => resolve(false), this.runnerCleanupTimeoutMs);
-								}),
-							]);
-							if (!settled) {
-								// An injected runner violated the cancellation contract. Keep its
-								// shared slot reserved until it settles; never admit replacement
-								// work on top of an operation that may still be using the backend.
-								cleanupIncomplete = true;
-								const retainedLease = acquireWorkflowAdmission(this.concurrency.ceiling);
-								const retainedRelease = releaseShared;
-								releaseShared = undefined;
-								const done = (): void => {
-									retainedRelease?.();
-									retainedLease.release();
-								};
-								void runnerPromise.then(done, done);
-							}
-						} finally {
-							if (cleanupTimer) clearTimeout(cleanupTimer);
-						}
-					}
+					await settleRunner();
 				}
 				const usage = normalizeUsage(raw.usage);
 				totalUsage = mergeWorkflowUsage(totalUsage, usage);
@@ -597,6 +627,7 @@ export class WorkflowRuntime {
 				}
 				if (raw.status === "failed" || raw.status === "aborted") {
 					const failure = raw.errorMessage ?? raw.text ?? `Workflow agent ${label} ${raw.status}`;
+					providerFailure = raw.errorMessage;
 					await this.appendFailure(
 						seq,
 						callHash,
@@ -666,13 +697,10 @@ export class WorkflowRuntime {
 			const message =
 				errorMessage(error) +
 				(cleanupIncomplete ? "; runner did not settle after cancellation; its shared slot remains reserved" : "");
-			// A timeout or abort we synthesized embeds the node label, so a label such as
-			// "fix 429" must not be read as a provider rate limit and throttle the pool.
-			const ownFailure =
-				/timed out after \d+ms \(execution only; queue time excluded\)|Workflow operation was aborted/u.test(
-					message,
-				);
-			const rateLimited = !ownFailure && isRateLimitError(message) && !isTerminalQuotaError(message);
+			const rateLimited =
+				providerFailure !== undefined &&
+				isRateLimitError(providerFailure) &&
+				!isTerminalQuotaError(providerFailure);
 			// Classify before recording anything. A failed journal or progress write must
 			// not replace the node's own error, and the marker has to exist before the
 			// bridge can ask for it, or parallel()/pipeline() reports this node failure a
@@ -709,7 +737,7 @@ export class WorkflowRuntime {
 								: "RATE_LIMITED"
 							: error instanceof WorkflowSchemaError
 								? "SCHEMA_VALIDATION_FAILED"
-								: message.includes("timed out after")
+								: timedOut
 									? "NODE_TIMEOUT"
 									: "NODE_FAILED",
 						message: message.slice(0, 2000),
@@ -860,8 +888,20 @@ export class WorkflowRuntime {
 
 	private async updateProgress(patch: Partial<WorkflowProgress> & { agent?: WorkflowProgressAgent }): Promise<void> {
 		if (this.lifecycle === "closed") return;
-		const snapshot = await this.progress.update({ ...patch, concurrency: this.concurrencySnapshot() });
-		this.onProgress?.(snapshot);
+		let snapshot: WorkflowProgress;
+		try {
+			snapshot = await this.progress.update({ ...patch, concurrency: this.concurrencySnapshot() });
+		} catch {
+			// progress.json is a projection. The in-memory state is already updated when a
+			// write fails, and a disk error here must not fail a node whose work finished.
+			snapshot = this.progress.current();
+		}
+		try {
+			this.onProgress?.(snapshot);
+		} catch {
+			// A live-update listener is a consumer of the projection. Its failure must not
+			// change run accounting, or one node failure is reported twice.
+		}
 	}
 
 	private concurrencySnapshot(): NonNullable<WorkflowProgress["concurrency"]> {

@@ -194,6 +194,17 @@ export class WorkflowSemaphore {
 		return this.limit;
 	}
 
+	/** True while congestion has lowered the cap or a cooldown is still pending. */
+	get throttled(): boolean {
+		return this.limit < this.ceiling || Date.now() < this.cooldownUntil;
+	}
+
+	/** Stop the cooldown timer while no run is attached; cap and cooldown are kept. */
+	park(): void {
+		if (this.wakeup) clearTimeout(this.wakeup);
+		this.wakeup = undefined;
+	}
+
 	async acquire(signal?: AbortSignal): Promise<() => void> {
 		if (this.disposed) throw new Error("Workflow admission is closed");
 		if (signal?.aborted) throw new Error("Workflow operation was aborted");
@@ -205,6 +216,7 @@ export class WorkflowSemaphore {
 		return new Promise<() => void>((resolve, reject) => {
 			const waiter: (typeof this.waiters)[number] = { resolve, reject, signal };
 			this.waiters.push(waiter);
+			if (!this.wakeup && Date.now() < this.cooldownUntil) this.scheduleDrain();
 			if (signal) {
 				const onAbort = (): void => {
 					const index = this.waiters.indexOf(waiter);

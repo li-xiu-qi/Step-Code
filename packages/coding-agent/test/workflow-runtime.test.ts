@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promis
 import os, { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { acquireWorkflowAdmission } from "../src/features/workflow/admission.ts";
+import { acquireWorkflowAdmission, resetWorkflowAdmission } from "../src/features/workflow/admission.ts";
 import {
 	clampWorkflowConcurrency,
 	configuredWorkflowConcurrencyLimit,
@@ -39,6 +39,7 @@ beforeEach(() => {
 afterEach(async () => {
 	vi.useRealTimers();
 	vi.restoreAllMocks();
+	resetWorkflowAdmission();
 	await Promise.all(cleanups.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
 });
 
@@ -306,18 +307,189 @@ test("a runner that throws while the journal is unwritable still reports the run
 	expect(progress.agents[0].error.message).not.toContain("EISDIR");
 });
 
+test("a throwing progress listener cannot double count a node failure", async () => {
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async () => ({ status: "failed", errorMessage: "provider failed" }),
+		{},
+	);
+	// Only the update that records the node failure throws, which is the path where a
+	// listener error used to escape and turn one failure into two.
+	(runtime as unknown as { onProgress?: (progress: WorkflowProgress) => void }).onProgress = (progress) => {
+		if (progress.agents.some((agent) => agent.status === "failed")) throw new Error("listener exploded");
+	};
+	const output = await runtime.runScript('return await parallel([() => agent("bad")]);', null);
+	expect(output).toMatchObject({ status: "failed", summary: { total: 1, completed: 0, failed: 1 } });
+	expect(output.taskFailures).toBeUndefined();
+});
+
 test("a node label that looks like a rate limit does not throttle the pool", async () => {
 	const { runtime } = runtimeAt(
 		await workspace(),
-		async () => {
-			throw new Error("Workflow agent fix 429 timed out after 1000ms (execution only; queue time excluded)");
-		},
-		{ maxConcurrency: 4 },
+		(input) =>
+			new Promise((resolve) => {
+				input.signal?.addEventListener("abort", () => resolve({ status: "aborted" }), { once: true });
+			}),
+		{ maxConcurrency: 4, agentTimeoutMs: 1_000 },
 	);
 	const output = await runtime.runScript('return await parallel([() => agent("a", {label: "fix 429"})]);', null);
 	expect(output.failures?.[0]?.error).toMatchObject({ code: "NODE_TIMEOUT", retryable: false });
 	// A synthesized timeout is not congestion, so the shared window keeps its cap.
 	expect(runtime.semaphore.max).toBe(4);
+});
+
+test("failed agent output that mentions rate limits is not provider congestion", async () => {
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async () => ({ status: "failed", text: "I could not finish: the 429 rate limit docs were unreachable" }),
+		{ maxConcurrency: 4 },
+	);
+	const output = await runtime.runScript('return await parallel([() => agent("document the 429 handler")]);', null);
+	expect(output.failures?.[0]?.error).toMatchObject({ code: "NODE_FAILED", retryable: false });
+	expect(runtime.semaphore.max).toBe(4);
+});
+
+test("a tool timeout in agent output is not reported as the node's own timeout", async () => {
+	const { runtime } = runtimeAt(await workspace(), async () => ({
+		status: "failed",
+		errorMessage: "bash command timed out after 30s",
+	}));
+	const output = await runtime.runScript('return await parallel([() => agent("run it")]);', null);
+	expect(output.failures?.[0]?.error).toMatchObject({ code: "NODE_FAILED" });
+});
+
+test("usage reported by a runner after cancellation is still charged to the budget", async () => {
+	const controller = new AbortController();
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "late_usage");
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "late_usage",
+		name: "test",
+		journal: new WorkflowJournal(paths),
+		signal: controller.signal,
+		runner: (input) =>
+			new Promise((resolve) => {
+				input.signal?.addEventListener(
+					"abort",
+					() => setTimeout(() => resolve({ ...result("partial", 7), status: "aborted" }), 5),
+					{ once: true },
+				);
+				queueMicrotask(() => controller.abort());
+			}),
+	});
+	await expect(runtime.runScript('return await agent("spend then cancel");', null)).rejects.toThrow(/aborted/i);
+	expect(runtime.budget.spent()).toBe(7);
+	const entries = await readJsonLines<{ status?: string; usage?: { input: number } }>(paths.journalPath);
+	expect(entries.at(-1)).toMatchObject({ status: "aborted", usage: { input: 7 } });
+});
+
+test("a resampled request in the same turn is tagged with the current congestion epoch", async () => {
+	let finish!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
+	let capAfterRecovery = 0;
+	let runtime!: WorkflowRuntime;
+	const built = runtimeAt(
+		await workspace(),
+		async (input) => {
+			if (input.prompt !== "d") {
+				await gate;
+				return result(input.prompt);
+			}
+			input.onModelRequest?.({ type: "started" });
+			// Wait until the window is full and "e" is queued behind it.
+			await vi.waitFor(() => expect(runtime.semaphore.active).toBe(4));
+			runtime.semaphore.throttle(runtime.semaphore.epoch, 0);
+			expect(runtime.semaphore.max).toBe(3);
+			// The first success belongs to the pre-throttle epoch and is ignored. The
+			// resample that follows has no "started" event and must count again.
+			for (let i = 0; i < 5; i++) input.onModelRequest?.({ type: "succeeded" });
+			capAfterRecovery = runtime.semaphore.max;
+			finish();
+			return result("d");
+		},
+		{ maxConcurrency: 4 },
+	);
+	runtime = built.runtime;
+	// "d" is the probe; "e" is queued behind the full window, so demand exists.
+	const output = await runtime.runScript(
+		'return await parallel([() => agent("a"), () => agent("b"), () => agent("c"), () => agent("d"), () => agent("e")]);',
+		null,
+	);
+	expect(output.failures).toEqual([]);
+	expect(output.status).toBe("completed");
+	expect(capAfterRecovery).toBe(4);
+});
+
+test("progress write failures never fail a finished node and recovery persists", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "progress_disk_blip");
+	let calls = 0;
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "progress_disk_blip",
+		name: "test",
+		journal: new WorkflowJournal(paths),
+		runner: async () => {
+			calls++;
+			if (calls === 1) {
+				// Renaming onto a directory fails, so every write while this exists errors.
+				await rm(paths.progressPath, { force: true });
+				await mkdir(paths.progressPath);
+			} else {
+				await rm(paths.progressPath, { recursive: true, force: true });
+			}
+			return result(`call ${calls}`);
+		},
+	});
+	const output = await runtime.runScript('return [await agent("one"), await agent("two")];', null);
+	expect(output).toMatchObject({ status: "completed", value: ["call 1", "call 2"], summary: { completed: 2 } });
+	const entries = await readJsonLines<{ status?: string }>(paths.journalPath);
+	expect(entries.map((entry) => entry.status)).toEqual(["completed", "completed"]);
+	expect(JSON.parse(await readFile(paths.progressPath, "utf8"))).toMatchObject({
+		status: "completed",
+		completedAgents: 2,
+	});
+});
+
+test("a throttled admission window is remembered briefly after the last workflow finishes", async () => {
+	vi.useFakeTimers();
+	const first = acquireWorkflowAdmission(4);
+	first.semaphore.throttle(first.semaphore.epoch, 20_000);
+	expect(first.semaphore.max).toBe(3);
+	first.release();
+	// No timer may keep the process alive while nothing is attached.
+	expect(vi.getTimerCount()).toBe(0);
+	const second = acquireWorkflowAdmission(4);
+	expect(second.semaphore.max).toBe(3);
+	// The retained cooldown still gates admission and re-arms its wakeup for waiters.
+	let admitted = false;
+	const acquired = second.semaphore.acquire().then((release) => {
+		admitted = true;
+		return release;
+	});
+	await vi.advanceTimersByTimeAsync(19_000);
+	expect(admitted).toBe(false);
+	await vi.advanceTimersByTimeAsync(1_500);
+	(await acquired)();
+	expect(admitted).toBe(true);
+	second.release();
+	// After the retention window the window starts fresh.
+	await vi.advanceTimersByTimeAsync(61_000);
+	const third = acquireWorkflowAdmission(4);
+	expect(third.semaphore.max).toBe(4);
+	third.release();
+});
+
+test("an untouched admission window is discarded as soon as it is idle", () => {
+	const first = acquireWorkflowAdmission(4);
+	const semaphore = first.semaphore;
+	first.release();
+	const second = acquireWorkflowAdmission(4);
+	expect(second.semaphore).not.toBe(semaphore);
+	second.release();
 });
 
 test("a transient progress write failure does not poison later writes", async () => {

@@ -11,8 +11,23 @@ interface ProviderError extends Error {
 	headers: Headers | undefined;
 }
 
+/** Thrown instead of sleeping when the server asks for a delay above the cap. */
+class ProviderRetryDelayError extends Error {
+	/** The server's requested delay, kept only when it came from a 429. */
+	readonly retryAfterMs: number | undefined;
+
+	constructor(message: string, retryAfterMs: number | undefined) {
+		super(message);
+		this.name = "ProviderRetryDelayError";
+		this.retryAfterMs = retryAfterMs;
+	}
+}
+
 /** Preserve Retry-After when provider retries are disabled or exhausted. */
 export function providerRetryAfterMs(error: unknown, now = Date.now()): number | undefined {
+	if (error instanceof ProviderRetryDelayError) {
+		return error.retryAfterMs !== undefined && Number.isFinite(error.retryAfterMs) ? error.retryAfterMs : undefined;
+	}
 	if (!isProviderError(error) || error.status !== 429) return undefined;
 	const retryAfterMs = error.headers?.get("retry-after-ms");
 	const header = error.headers?.get("retry-after");
@@ -56,12 +71,13 @@ function isRetryableProviderError(error: ProviderError): boolean {
 function validateServerRetryDelayMs(
 	delayMs: number,
 	maxRetryDelayMs: number | undefined,
-	providerErrorMessage: string,
+	error: ProviderError,
 ): number {
 	const maxDelayMs = maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
 	if (maxDelayMs > 0 && delayMs > maxDelayMs) {
-		throw new Error(
-			`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${providerErrorMessage}`,
+		throw new ProviderRetryDelayError(
+			`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${error.message}`,
+			error.status === 429 ? delayMs : undefined,
 		);
 	}
 	return delayMs;
@@ -71,14 +87,14 @@ function getRetryDelayMs(error: ProviderError, retryIndex: number, maxRetryDelay
 	const retryAfterMs = error.headers?.get("retry-after-ms");
 	if (retryAfterMs) {
 		const value = Number.parseFloat(retryAfterMs);
-		if (!Number.isNaN(value)) return validateServerRetryDelayMs(value, maxRetryDelayMs, error.message);
+		if (!Number.isNaN(value)) return validateServerRetryDelayMs(value, maxRetryDelayMs, error);
 	}
 
 	const retryAfter = error.headers?.get("retry-after");
 	if (retryAfter) {
 		const seconds = Number.parseFloat(retryAfter);
 		const delayMs = Number.isNaN(seconds) ? Date.parse(retryAfter) - Date.now() : seconds * 1000;
-		return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error.message);
+		return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error);
 	}
 
 	const exponentialDelay = Math.min(0.5 * 2 ** retryIndex, 8) * 1000;
