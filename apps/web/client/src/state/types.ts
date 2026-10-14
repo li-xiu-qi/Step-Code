@@ -117,8 +117,6 @@ export interface MessageTimelineItem {
 	readonly entryId?: string;
 	readonly role: string;
 	readonly content: string;
-	/** Live turn only: the model is reasoning and has not produced text yet. */
-	readonly thinking?: boolean;
 	readonly usage?: Usage;
 	readonly timestamp?: string;
 }

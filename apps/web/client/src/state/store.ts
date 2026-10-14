@@ -152,10 +152,22 @@ export interface ToastState {
 	readonly seq: number;
 }
 
+export interface PendingTurn {
+	readonly text: string;
+	/** User messages in the timeline when it was sent; one more means the host has recorded it. */
+	readonly userCount: number;
+}
+
 export interface AppState {
 	readonly sessions: readonly SessionSummary[];
 	readonly current: SessionSnapshot | null;
 	readonly timelineItems: readonly TimelineItem[];
+	/**
+	 * A message sent but not yet in the session entries. The composer sets it on
+	 * Enter so the stream shows the message and a thinking indicator at once,
+	 * instead of after session creation, `agent_start` and the first token.
+	 */
+	readonly pendingTurn: PendingTurn | null;
 	readonly bootstrapCwd: string;
 	readonly draftCwd: string;
 	readonly draftPolicy: string;
@@ -218,6 +230,7 @@ export function createInitialState(): AppState {
 		sessions: [],
 		current: null,
 		timelineItems: [],
+		pendingTurn: null,
 		bootstrapCwd: "",
 		draftCwd: "",
 		draftPolicy: "ask",

@@ -190,17 +190,28 @@ function approvalItems(snapshot: SessionSnapshot): TimelineItem[] {
  * Everything the legacy function painted is derived from these fields.
  */
 export function renderSnapshot(snapshot: SessionSnapshot): void {
-	setState((state) => ({
-		current: snapshot,
-		policiesCache: snapshot.policies ?? state.policiesCache,
-		draftCwd: snapshot.cwd,
-		draftPolicy: snapshot.permissionPreset || "ask",
-		draftModel: snapshot.model ? modelKey(snapshot.model) : "",
-		statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
-		unreadById: mapWith(state.unreadById, snapshot.id, false),
-		sessions: mergeSessionSummary(state.sessions, snapshot),
-		timelineItems: [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)],
-	}));
+	setState((state) => {
+		const timelineItems = [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)];
+		const pendingTurn =
+			state.pendingTurn && countUserMessages(timelineItems) > state.pendingTurn.userCount ? null : state.pendingTurn;
+		return {
+			current: snapshot,
+			policiesCache: snapshot.policies ?? state.policiesCache,
+			draftCwd: snapshot.cwd,
+			draftPolicy: snapshot.permissionPreset || "ask",
+			draftModel: snapshot.model ? modelKey(snapshot.model) : "",
+			statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
+			unreadById: mapWith(state.unreadById, snapshot.id, false),
+			sessions: mergeSessionSummary(state.sessions, snapshot),
+			timelineItems,
+			pendingTurn,
+		};
+	});
+}
+
+/** User messages in a timeline; `pendingTurn` compares this before and after a send. */
+export function countUserMessages(items: readonly TimelineItem[]): number {
+	return items.filter((item) => item.kind === "message" && item.role === "user").length;
 }
 
 /* ── Live stream ─────────────────────────────────────────────────────────── */
@@ -216,7 +227,7 @@ export function closeStream(): void {
 
 interface AgentStreamEvent {
 	readonly type: string;
-	readonly message?: { readonly content?: unknown };
+	readonly message?: { readonly role?: string; readonly content?: unknown };
 	readonly toolCallId?: string;
 	readonly toolName?: string;
 	readonly args?: unknown;
@@ -257,7 +268,6 @@ function applyLiveMessage(content: unknown): void {
 	const text = contentText(content);
 	const parts = Array.isArray(content) ? (content as readonly ContentPart[]) : [];
 	const calls = parts.filter((part) => part?.type === "toolCall");
-	const thinking = !text && parts.some((part) => part?.type === "thinking");
 	updateTimeline((items) => {
 		let next = items;
 		if (text || calls.length === 0) {
@@ -266,7 +276,6 @@ function applyLiveMessage(content: unknown): void {
 				kind: "message",
 				role: "assistant",
 				content: text,
-				thinking,
 			});
 		} else {
 			next = next.filter((item) => item.itemId !== "message-live");
@@ -321,6 +330,17 @@ function handleAgentEvent(agentEvent: AgentStreamEvent): void {
 		return;
 	}
 	flushLiveMessage();
+	if (agentEvent.type === "message_start" && agentEvent.message?.role === "user") {
+		// The prompt entered the loop: show it in place now; the refresh after
+		// its message_end replaces this row with the recorded entry.
+		const content = contentText(agentEvent.message.content);
+		setState((state) => ({
+			pendingTurn: null,
+			timelineItems: content
+				? upsertItem(state.timelineItems, { itemId: "message-user-live", kind: "message", role: "user", content })
+				: state.timelineItems,
+		}));
+	}
 	if (agentEvent.type === "tool_execution_start") {
 		updateTimeline((items) =>
 			upsertItem(items, {
@@ -376,6 +396,8 @@ export function connectStream(id: string): void {
 		const payload = JSON.parse((event as MessageEvent).data) as { status: SessionStatus; unread: boolean };
 		if (payload.status !== "waiting") liveApprovals.clear();
 		setState((state) => ({
+			// Only a running turn can still record the pending message.
+			pendingTurn: state.current?.id === id && payload.status !== "running" ? null : state.pendingTurn,
 			statusById: mapWith(state.statusById, id, payload.status),
 			unreadById: mapWith(state.unreadById, id, payload.unread),
 			current:
@@ -393,9 +415,10 @@ export function connectStream(id: string): void {
 				: [...items, { itemId: `approval-${approval.id}`, kind: "approval", approval }],
 		);
 	});
-	source.addEventListener("web_error", (event) =>
-		showError(JSON.parse((event as MessageEvent).data).message || "运行错误"),
-	);
+	source.addEventListener("web_error", (event) => {
+		setState({ pendingTurn: null });
+		showError(JSON.parse((event as MessageEvent).data).message || "运行错误");
+	});
 	source.onerror = () => {
 		setTimeout(() => void refreshCurrent().catch(() => {}), 600);
 	};
@@ -425,6 +448,7 @@ export async function refreshWorkspaces(): Promise<void> {
 /** Open a session and follow its stream (legacy `openSession`, 3122-3130). */
 export async function openSession(id: string): Promise<void> {
 	setUi({ midView: null });
+	setState({ pendingTurn: null });
 	try {
 		const snapshot = await api<SessionSnapshot>(`/api/v1/sessions/${id}`);
 		renderSnapshot(snapshot);
@@ -452,6 +476,7 @@ export function startDraft(cwd: string = getState().bootstrapCwd): void {
 			draftModel: current ? (current.model ? modelKey(current.model) : state.draftModel) : state.draftModel,
 			current: null,
 			timelineItems: [],
+			pendingTurn: null,
 			draftCwd: cwd || state.bootstrapCwd,
 		};
 	});

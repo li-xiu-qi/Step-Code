@@ -7,6 +7,7 @@ import type { MessageTimelineItem } from "../../state/types";
 import { Icon, LEGACY_ICONS, MarkdownView } from "../../ui";
 import { forkAtEntry } from "./actions";
 import { openFeedback, type Sentiment } from "./feedback";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 
 /**
  * One chat message (legacy `renderTimeline` message branch, app.js 2253-2261).
@@ -15,14 +16,15 @@ import { openFeedback, type Sentiment } from "./feedback";
 export const MessageItem = memo(function MessageItem({ item }: { readonly item: MessageTimelineItem }) {
 	const t = useT();
 	const role = item.role === "user" ? "user" : "assistant";
-	const placeholder = item.thinking ? t("thinkingLive") : t("generating");
 	const codeLabel = t("code");
 	const copyLabel = t("copy");
 	// Memoised: a streaming turn re-renders the timeline per frame, and parsing every earlier message each time made long sessions crawl.
 	const html = useMemo(
-		() => renderMarkdown(item.content || placeholder, { code: codeLabel, copy: copyLabel }),
-		[item.content, placeholder, codeLabel, copyLabel],
+		() => renderMarkdown(item.content, { code: codeLabel, copy: copyLabel }),
+		[item.content, codeLabel, copyLabel],
 	);
+	// The live turn before its first text (reasoning, or waiting on the first token).
+	if (role === "assistant" && !item.content) return <ThinkingIndicator />;
 	return (
 		<article className={`message ${role}`} data-content={item.content || ""} data-entry-id={item.entryId}>
 			<MarkdownView className="message-body" html={html} onCopyCode={(code) => void copyText(code)} />

@@ -69,6 +69,12 @@
 	width: 100%;
 }
 
+/* Same text metrics as .message-body so the reply replaces it without a jump. */
+.thinking-indicator {
+	font-size: 15px;
+	line-height: 1.75;
+}
+
 /* Message action row, first block (legacy styles.css 709-720). */
 .message-actions {
 	display: flex;

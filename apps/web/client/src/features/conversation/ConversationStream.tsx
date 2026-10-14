@@ -3,6 +3,7 @@ import { useLocale, useT } from "../../i18n";
 import { useAppStore } from "../../state/store";
 import type { TimelineItem } from "../../state/types";
 import { MessageItem } from "./MessageItem";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ApprovalCard, ToolRow } from "./TimelineRows";
 
 /** Shown while the timeline is empty (legacy index.html 835-842, `renderTimeline`). */
@@ -36,6 +37,19 @@ function itemKeys(items: readonly TimelineItem[]): string[] {
 }
 
 /**
+ * Whether a running turn is between visible steps: right after the prompt, or
+ * after a tool finished and before the model's next output. A streaming reply,
+ * a running tool or an approval card already shows what is going on.
+ */
+function awaitingOutput(items: readonly TimelineItem[]): boolean {
+	const last = items.at(-1);
+	if (!last) return true;
+	if (last.kind === "message") return last.role === "user";
+	if (last.kind === "tool") return last.state !== "pending";
+	return false;
+}
+
+/**
  * `#stream > #streamInner`: the session timeline (legacy `renderTimeline`,
  * app.js 2246-2281). Like the legacy renderer it jumps to the bottom every time
  * the timeline (or the language) changes. The task banner and usage trigger the
@@ -43,24 +57,36 @@ function itemKeys(items: readonly TimelineItem[]): string[] {
  */
 export function ConversationStream() {
 	const items = useAppStore((state) => state.timelineItems);
+	const pendingTurn = useAppStore((state) => state.pendingTurn);
+	const running = useAppStore((state) => state.current?.status === "running");
 	const locale = useLocale();
 	const streamRef = useRef<HTMLDivElement>(null);
 	const keys = itemKeys(items);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: legacy renderTimeline scrolled to the bottom on every redraw; items and locale are the redraw triggers.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: legacy renderTimeline scrolled to the bottom on every redraw; items, the pending message and locale are the redraw triggers.
 	useLayoutEffect(() => {
 		const stream = streamRef.current;
 		if (stream) stream.scrollTop = stream.scrollHeight;
-	}, [items, locale]);
+	}, [items, pendingTurn, locale]);
+	// A pending message is drawn after the timeline, so the indicator follows it.
+	const thinking = pendingTurn !== null || (running && awaitingOutput(items));
 	return (
 		<div className="stream" id="stream" ref={streamRef}>
 			<div className="stream-inner" id="streamInner">
-				{items.length ? (
-					items.map((item, index) => {
-						const key = keys[index];
-						if (item.kind === "message") return <MessageItem key={key} item={item} />;
-						if (item.kind === "tool") return <ToolRow key={key} item={item} />;
-						return <ApprovalCard key={key} approval={item.approval} />;
-					})
+				{items.length || pendingTurn ? (
+					<>
+						{items.map((item, index) => {
+							const key = keys[index];
+							if (item.kind === "message") return <MessageItem key={key} item={item} />;
+							if (item.kind === "tool") return <ToolRow key={key} item={item} />;
+							return <ApprovalCard key={key} approval={item.approval} />;
+						})}
+						{pendingTurn ? (
+							<MessageItem
+								item={{ itemId: "message-pending", kind: "message", role: "user", content: pendingTurn.text }}
+							/>
+						) : null}
+						{thinking ? <ThinkingIndicator /> : null}
+					</>
 				) : (
 					<EmptyConversation />
 				)}
