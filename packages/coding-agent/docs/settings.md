@@ -165,6 +165,8 @@ Node timeouts cover model requests, tool execution, and retries **after admissio
 
 Failed nodes are retained in the journal and final `failures` list even if the script catches errors or filters `parallel()`'s null results. Final status is `partial_failed` for mixed outcomes and `failed` when all nodes fail; both are error tool results with successful output preserved. `summary.completed` counts successful/cached nodes, not attempted calls. Request retry counts (`rateLimitRetries`) are separate from schema `attempt`.
 
+A callback that catches an agent-node failure and rethrows a **new** error is counted twice, as one failed node and one callback failure, because the node-failure marker travels with the original error object. Rethrow the caught error itself to keep a single count. The shared admission window covers concurrent workflows and is released when the last one finishes, so a later run starts from the full ceiling even right after a 429.
+
 ```json
 {
   "retry": {
