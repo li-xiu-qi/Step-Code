@@ -5,6 +5,8 @@ export interface ApprovalRequest {
 	readonly sessionId: string;
 	readonly toolName: string;
 	readonly message: string;
+	readonly input?: Record<string, unknown>;
+	readonly reason?: string;
 	readonly createdAt: number;
 	readonly preview?: {
 		readonly path?: string;
@@ -43,18 +45,27 @@ export class ApprovalBroker {
 	}
 
 	confirm(toolName: string, message: string, signal?: AbortSignal): Promise<boolean> {
-		if (this.alwaysAllow.has(toolName)) return Promise.resolve(true);
-		const id = randomUUID();
 		const callId = /\[([^\]]+)\]$/u.exec(toolName)?.[1];
 		const captured = callId ? this.toolCalls.get(callId.slice(-8)) : undefined;
 		if (callId) this.toolCalls.delete(callId.slice(-8));
+		const name = captured?.toolName ?? toolName.replace(/\s+\[[^\]]+\]$/u, "");
+		const reason = message
+			.split("\n\n", 1)[0]
+			.replace(/^Call: [^\n]*\n/u, "")
+			.trim();
+		// Reuse only ordinary mutation confirmations from the kernel. Danger and
+		// incomplete-analysis prompts still require a verdict for each call.
+		const reusable = !callId || reason === `${name} can modify the workspace or execute a command`;
+		if (reusable && this.alwaysAllow.has(name)) return Promise.resolve(true);
+		const id = randomUUID();
 		const request = {
 			id,
 			sessionId: this.sessionId,
-			toolName: captured?.toolName ?? toolName.replace(/\s+\[[^\]]+\]$/u, ""),
+			toolName: name,
 			message,
+			reason,
 			createdAt: Date.now(),
-			...(captured ? { preview: previewForTool(captured.input) } : {}),
+			...(captured ? { input: captured.input, preview: previewForTool(captured.input) } : {}),
 		};
 		return new Promise<boolean>((resolve) => {
 			const pending: PendingApproval = { request, resolve };

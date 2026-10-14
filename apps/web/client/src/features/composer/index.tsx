@@ -12,6 +12,7 @@ import { useAppStore } from "../../state/store";
 import { Icon } from "../../ui";
 import { AttachControls, AttachmentList } from "./Attachments";
 import { sendMessage } from "./actions";
+import { ClarificationPanel } from "./ClarificationPanel";
 import { ModelMenu } from "./ModelMenu";
 import { ModeMenu } from "./ModeMenu";
 import { PolicyMenu } from "./PolicyMenu";
@@ -60,6 +61,7 @@ export function Composer({ workspaceControl }: ComposerProps) {
 
 	return (
 		<form className="composer" id="composer" ref={form} onSubmit={submit}>
+			<ClarificationPanel />
 			<div className="composer-card">
 				<PromptInput promptRef={prompt} disabled={waiting} onSubmit={() => form.current?.requestSubmit()} />
 				<AttachmentList />

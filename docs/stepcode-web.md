@@ -56,6 +56,42 @@ The approval path is an adapter: Step extensions call
 request, and the browser returns `approve`, `approve_for_session`, or `deny`.
 Missing or cancelled approvals fail closed.
 
+Approval snapshots and SSE requests include the full captured tool `input` and
+the specific policy `reason`. The browser renders a neutral card with a localized
+approval title and the complete command or file-change preview, instead of the
+clipped Call/batch diagnostic message. Content initially shows three lines and
+can expand; the full arguments remain available before a verdict. The card offers
+only Deny and Allow for Session. Allow for Session is keyed by the canonical tool
+name, so later calls with different call IDs reuse the grant; other tools still
+ask. Specific danger or incomplete-analysis prompts still require a verdict per
+call, even with a session grant. These presentation changes do not alter the permission policy or the
+existing verdict endpoint.
+
+Clarification uses the existing `clarify_user` tool and the optional structured
+`ExtensionUIContext.clarify(questions, signal)` capability. The coding tool owns
+normalization and tool-result text; the Web Host transports the complete question
+set through `clarification_required` SSE and `pendingClarifications` in snapshots.
+The extension runner brackets this capability with the existing `custom`
+`ui_prompt_start` / `ui_prompt_end` lifecycle, so runtime consumers see the same
+user-wait interval as a terminal dialog.
+`POST /api/v1/sessions/{id}/clarifications/response` validates question order and
+option indexes, derives canonical option values, and resumes the pending tool
+call. It never sends the answer as a new user prompt. `clarification_resolved`
+removes the card on every connected page. Abort, session replacement and shutdown
+cancel pending calls. Browser reload restores pending questions while the Host is
+alive; restarting the Host does not replay interrupted tools.
+
+The composer shows a paginated question card above its input. Clicking a choice
+or skipping saves that answer and advances. The last outstanding answer submits
+the complete set automatically. Custom replies use Enter (Shift+Enter inserts a
+newline; IME confirmation does not submit). Paging preserves selections and text
+drafts. Navigating ahead never implicitly answers an earlier question. The close
+button cancels the set; failed sends retain answers for retry. Voice input is not
+part of this flow. The shared React client renders the same card in desktop hosts.
+`clarify_user` is classified as a non-mutating tool, so Ask opens the questions
+directly; explicit per-tool confirm/deny overrides still apply. Escape cancels
+the waiting turn through the existing interrupt action.
+
 Within one Web Host process, an in-memory per-session writer lease prevents two
 Web session objects from appending to the same JSONL file. This is not a
 cross-process lock. An older CLI that does not participate in a lease protocol

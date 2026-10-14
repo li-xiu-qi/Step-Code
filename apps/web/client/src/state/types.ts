@@ -96,13 +96,37 @@ export interface SessionSnapshot extends SessionSummary {
 	readonly models?: readonly ModelInfo[];
 	/** Tool calls still waiting for a verdict; the stream only announces each one once. */
 	readonly pendingApprovals?: readonly ApprovalRequest[];
+	readonly pendingClarifications?: readonly ClarificationRequest[];
 }
+
+export interface ClarificationQuestion {
+	readonly id: string;
+	readonly label: string;
+	readonly question: string;
+	readonly reason?: string;
+	readonly options: readonly { readonly label: string; readonly value: string; readonly description?: string }[];
+	readonly allowFreeform: boolean;
+}
+
+export interface ClarificationRequest {
+	readonly id: string;
+	readonly sessionId: string;
+	readonly questions: readonly ClarificationQuestion[];
+}
+
+export type ClarificationReply = { readonly id: string } & (
+	| { readonly optionIndex: number }
+	| { readonly text: string }
+	| { readonly skipped: true }
+);
 
 export interface ApprovalRequest {
 	readonly id: string;
 	readonly sessionId: string;
 	readonly toolName: string;
 	readonly message: string;
+	readonly input?: Readonly<Record<string, unknown>>;
+	readonly reason?: string;
 	readonly createdAt: number;
 	readonly preview?: {
 		readonly path?: string;

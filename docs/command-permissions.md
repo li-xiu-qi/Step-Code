@@ -18,6 +18,10 @@ as a detected dangerous command.
 Outside Full Access, neither outcome can use an automatic tool override or unattended `allow`.
 Explicit user approval applies only to that call.
 
+`clarify_user` only collects a user decision and is classified with non-mutating
+tools. Ask opens its question UI directly rather than first requesting permission
+to ask. Explicit `clarify_user: deny` or `confirm` overrides remain effective.
+
 Without an approval channel, a deny ends the run by default. The opt-in
 `nonInteractiveDenial: "continue"` (CLI `--non-interactive-denial continue`,
 env `STEP_NON_INTERACTIVE_DENIAL=continue`) keeps a recoverable confirmation

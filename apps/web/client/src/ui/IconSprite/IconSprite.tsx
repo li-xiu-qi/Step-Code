@@ -61,6 +61,9 @@ export const ICON_NAMES = [
 	"tag",
 	"clock",
 	"puzzle",
+	"question",
+	"pencil",
+	"terminal",
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -68,6 +71,44 @@ export type IconName = (typeof ICON_NAMES)[number];
 export function IconSprite() {
 	return (
 		<svg className={cx(styles.root, "icon-sprite")} aria-hidden="true" focusable="false">
+			{/* Lucide square-terminal, adapted to the shared sprite. */}
+			<symbol
+				id="i-terminal"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<rect x="3" y="3" width="18" height="18" rx="2" />
+				<path d="m7 9 3 3-3 3M13 15h4" />
+			</symbol>
+			{/* Lucide message-circle-question and Feather edit-2; see docs/THIRD_PARTY_PROVENANCE.md. */}
+			<symbol
+				id="i-question"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+				<path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+				<path d="M12 17h.01" />
+			</symbol>
+			<symbol
+				id="i-pencil"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M17 3a2.828 2.828 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+			</symbol>
 			<symbol id="i-sidebar" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5">
 				<rect x="1.75" y="2.75" width="14.5" height="12.5" rx="2" />
 				<path d="M6.5 2.75v12.5" />
