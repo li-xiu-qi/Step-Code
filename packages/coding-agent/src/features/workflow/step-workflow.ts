@@ -46,7 +46,7 @@ export const WorkflowParams = Type.Object({
 			minimum: 1_000,
 			maximum: 3_600_000,
 			description:
-				"Total execution deadline per node, including model requests, tools and retries; excludes queue time. Allow model overhead in addition to tool durations. Default 30 minutes.",
+				"Execution deadline per schema attempt, including model requests, tools and retries; excludes queue time, and a schema retry gets a fresh deadline. Allow model overhead in addition to tool durations. Default 30 minutes.",
 		}),
 	),
 });

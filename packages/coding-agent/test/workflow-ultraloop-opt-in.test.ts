@@ -60,6 +60,40 @@ test("asking about a counted fan-out is not consent to run one", () => {
 	}
 });
 
+test("refusals, hedging, and deliberation are never consent", () => {
+	for (const prompt of [
+		"Please don't launch 10 subagents",
+		"do not spawn 5 agents for this",
+		"never run 3 agents here",
+		"no need to spawn 5 agents",
+		"Rather than launch 10 agents, just read the file",
+		"I might launch 10 subagents later, for now read X",
+		"不要开10个子agent",
+		"先别开10个子agent",
+		"开10个子agent，还是先用subagent工具吧",
+	]) {
+		expect(detectUltraloopOptIn(prompt), prompt).toBeUndefined();
+	}
+	// "特别" contains 别; a real request that uses it is not a refusal.
+	expect(detectUltraloopOptIn("开10个子agent，特别是review")).toBeDefined();
+});
+
+test("a counted agent noun that is not a fan-out target is not consent", () => {
+	for (const prompt of [
+		"create 3 agent definition files",
+		"创建3个agent配置文件",
+		"start 4 agentic tests",
+		"run 3 agents.md files through the linter",
+		"start 3 agent-based tests",
+	]) {
+		expect(detectUltraloopOptIn(prompt), prompt).toBeUndefined();
+	}
+	// The same shape with a real fan-out target still opts in.
+	for (const prompt of ["开10个子agent查一下", "launch 10 subagents for the audit", "开10个agent 随机sleep"]) {
+		expect(detectUltraloopOptIn(prompt), prompt).toBeDefined();
+	}
+});
+
 type Command = Parameters<ExtensionAPI["registerCommand"]>[1];
 
 interface Recorded {

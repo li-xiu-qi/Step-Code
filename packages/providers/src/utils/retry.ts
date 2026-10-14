@@ -73,6 +73,10 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 	"ended without",
 	"stream ended before message_stop",
 	"stream ended before a terminal response event",
+	// The agent loop finalizes a partial assistant message with this text when a
+	// provider stream closes before its terminal event (agent-core
+	// normalizeProviderStream). A truncated stream is transient and retryable.
+	"ended before completion",
 	"http2 request did not get a response",
 
 	// Provider-requested retry delay cap failures should flow through the outer

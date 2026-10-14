@@ -23,6 +23,10 @@ describe("provider request retries", () => {
 		expect(providerRetryAfterMs(providerError(429, { "retry-after": "Thu, 01 Jan 1970 00:00:00 GMT" }), 5000)).toBe(
 			0,
 		);
+		// An empty or non-numeric retry-after-ms must fall back to retry-after, not read as zero.
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "", "retry-after": "7" }))).toBe(7000);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "  ", "retry-after": "7" }))).toBe(7000);
+		expect(providerRetryAfterMs(providerError(429, { "retry-after-ms": "soon", "retry-after": "7" }))).toBe(7000);
 	});
 	afterEach(() => {
 		vi.useRealTimers();

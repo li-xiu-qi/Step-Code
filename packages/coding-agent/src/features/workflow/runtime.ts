@@ -592,7 +592,7 @@ export class WorkflowRuntime {
 						attempt,
 						errorMessage(error),
 						rateLimitRetries,
-					).catch(() => undefined);
+					);
 					throw error;
 				}
 				if (raw.status === "failed" || raw.status === "aborted") {
@@ -606,7 +606,7 @@ export class WorkflowRuntime {
 						attempt,
 						failure,
 						rateLimitRetries,
-					).catch(() => undefined);
+					);
 					throw new Error(failure);
 				}
 				const value = normalizeWorkflowAgentValue(raw);
@@ -624,7 +624,7 @@ export class WorkflowRuntime {
 						attempt,
 						lastErrors.join("; "),
 						rateLimitRetries,
-					).catch(() => undefined);
+					);
 					throw new WorkflowSchemaError(lastErrors, attempt);
 				}
 				const finalValue = normalizedOptions.schema ? validation.value : value;
@@ -666,7 +666,13 @@ export class WorkflowRuntime {
 			const message =
 				errorMessage(error) +
 				(cleanupIncomplete ? "; runner did not settle after cancellation; its shared slot remains reserved" : "");
-			const rateLimited = isRateLimitError(message) && !isTerminalQuotaError(message);
+			// A timeout or abort we synthesized embeds the node label, so a label such as
+			// "fix 429" must not be read as a provider rate limit and throttle the pool.
+			const ownFailure =
+				/timed out after \d+ms \(execution only; queue time excluded\)|Workflow operation was aborted/u.test(
+					message,
+				);
+			const rateLimited = !ownFailure && isRateLimitError(message) && !isTerminalQuotaError(message);
 			// Classify before recording anything. A failed journal or progress write must
 			// not replace the node's own error, and the marker has to exist before the
 			// bridge can ask for it, or parallel()/pipeline() reports this node failure a
@@ -685,7 +691,7 @@ export class WorkflowRuntime {
 					schemaAttempt,
 					message,
 					rateLimitRetries,
-				).catch(() => undefined);
+				);
 			}
 			if (rateLimited) {
 				this.semaphore.throttle(requestEpoch, 1000);
@@ -985,20 +991,25 @@ export class WorkflowRuntime {
 		error: string,
 		rateLimitRetries = 0,
 	): Promise<void> {
-		await this.journal.append({
-			schemaVersion: 1,
-			seq,
-			callId: `${this.runId}-${seq + 1}`,
-			callHash,
-			prompt,
-			options: workflowJsonValue(serializableOptions(options)),
-			status: this.signal?.aborted ? "aborted" : "failed",
-			usage,
-			attempt,
-			rateLimitRetries,
-			createdAt: this.readNow(),
-			error: error.slice(0, 2_000),
-		});
+		// Recording a failure is best effort. The node already failed, so a journal
+		// write error must never replace the node's own error, change the run's
+		// terminal status, or skip failure classification.
+		await this.journal
+			.append({
+				schemaVersion: 1,
+				seq,
+				callId: `${this.runId}-${seq + 1}`,
+				callHash,
+				prompt,
+				options: workflowJsonValue(serializableOptions(options)),
+				status: this.signal?.aborted ? "aborted" : "failed",
+				usage,
+				attempt,
+				rateLimitRetries,
+				createdAt: this.readNow(),
+				error: error.slice(0, 2_000),
+			})
+			.catch(() => undefined);
 		this.recordedFailures.add(seq);
 	}
 

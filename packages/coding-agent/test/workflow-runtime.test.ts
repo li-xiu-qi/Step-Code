@@ -285,6 +285,61 @@ test("a failed journal append while recording a node keeps the failure classifie
 	expect(output.failures?.[0]?.error?.message).toContain("provider failed");
 });
 
+test("a runner that throws while the journal is unwritable still reports the runner error", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "node_throw_journal_failure");
+	await mkdir(paths.runDir, { recursive: true });
+	await mkdir(paths.journalPath, { recursive: true });
+	const runtime = new WorkflowRuntime({
+		cwd,
+		runId: "node_throw_journal_failure",
+		name: "test",
+		journal: new WorkflowJournal(paths),
+		runner: async () => {
+			throw new Error("provider exploded");
+		},
+	});
+	// The journal error must not replace the runner's error, in either channel.
+	await expect(runtime.runScript('return await agent("boom");', null)).rejects.toThrow("provider exploded");
+	const progress = JSON.parse(await readFile(paths.progressPath, "utf8"));
+	expect(progress.agents[0].error.message).toContain("provider exploded");
+	expect(progress.agents[0].error.message).not.toContain("EISDIR");
+});
+
+test("a node label that looks like a rate limit does not throttle the pool", async () => {
+	const { runtime } = runtimeAt(
+		await workspace(),
+		async () => {
+			throw new Error("Workflow agent fix 429 timed out after 1000ms (execution only; queue time excluded)");
+		},
+		{ maxConcurrency: 4 },
+	);
+	const output = await runtime.runScript('return await parallel([() => agent("a", {label: "fix 429"})]);', null);
+	expect(output.failures?.[0]?.error).toMatchObject({ code: "NODE_TIMEOUT", retryable: false });
+	// A synthesized timeout is not congestion, so the shared window keeps its cap.
+	expect(runtime.semaphore.max).toBe(4);
+});
+
+test("a transient progress write failure does not poison later writes", async () => {
+	const cwd = await workspace();
+	const paths = createWorkflowRunPaths(cwd, "progress_recovery");
+	const store = new WorkflowProgressStore(paths.progressPath, initialProgress("progress_recovery"));
+	await store.update({ status: "running" });
+	// Point the store at a path that cannot be written (a directory sits there), then
+	// move it back: the second write must still land.
+	const blocked = path.join(cwd, "blocked");
+	await mkdir(path.join(blocked, "progress.json"), { recursive: true });
+	const target = store as unknown as { path: string };
+	target.path = path.join(blocked, "progress.json");
+	await expect(store.update({ message: "first failure" })).rejects.toThrow(/EISDIR|ENOTDIR/);
+	target.path = paths.progressPath;
+	await store.update({ status: "completed", message: "recovered" });
+	expect(JSON.parse(await readFile(paths.progressPath, "utf8"))).toMatchObject({
+		status: "completed",
+		message: "recovered",
+	});
+});
+
 test("shell interpolation errors before agent() cannot become a successful zero-call workflow", async () => {
 	let calls = 0;
 	const { runtime, paths } = runtimeAt(await workspace(), async (input) => {

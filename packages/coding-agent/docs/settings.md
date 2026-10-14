@@ -151,7 +151,7 @@ Temporary 429/concurrency errors retry the current model request, preserving com
 
 ### Workflow concurrency and failures
 
-Explicit counted fan-out requests such as `开10个子agent` / `launch 10 subagents` activate per-turn workflow orchestration without requiring the Ultraloop keyword. The ordinary `subagent` tool also accepts batches larger than its concurrent window (up to 1000 by default) and queues the excess; its default concurrency uses the same CPU-derived ceiling.
+Explicit counted fan-out requests such as `开10个子agent` / `launch 10 subagents` activate per-turn workflow orchestration without requiring the Ultraloop keyword. A counted request is only consent when the user is asking for the work: questions about it (`开10个子agent要多少钱？`), refusals, hedging, and file/role nouns (`3 agent definition files`) are not. The ordinary `subagent` tool also accepts batches larger than its concurrent window (up to 1000 by default) and queues the excess; its default concurrency uses the same CPU-derived ceiling, but it runs in its own window and does not read `STEP_WORKFLOW_CONCURRENCY_LIMIT`.
 
 The workflow ceiling is `max(1, min(16, CPU count - 2))`. Model-authored `maxConcurrency` can only lower this ceiling. Set `STEP_WORKFLOW_CONCURRENCY_LIMIT=8` to impose a lower trusted provider limit (for example, a backend allowing eight simultaneous requests). The effective ceiling is the minimum of the machine and configured limits; the final result reports requested, effective, and current concurrency.
 
@@ -161,7 +161,7 @@ A node's own retry honors the server's `Retry-After` verbatim, however large. Th
 
 `parallel()` accepts both lazy functions (`parallel(items.map(x => () => agent(String(x))))`) and eager promises (`parallel(items.map(x => agent(String(x))))`). Always await or return the operation. Invalid entries reject the batch. A script error or an early return with unfinished calls cancels running and queued nodes and waits for cleanup before publishing the terminal state; production child processes retain their shared slots until they exit. The UI shows concurrency clamping as a Notice, and script failure/cancellation separately.
 
-Node timeouts cover model requests, tool execution, and retries **after admission**, not time waiting in either queue. For experiments that report sleep durations or random choices, generate, capture and print all required values in one command, then require structured output with `agent(..., {schema})`. An empty sleep output is not evidence of the chosen duration. See [Workflow experiments](workflow-experiments.md).
+Node timeouts cover model requests, tool execution, and retries **after admission**, not time waiting in either queue. The deadline is armed per schema attempt, so a node retried for schema mismatches can take up to three times `agentTimeoutMs`. For experiments that report sleep durations or random choices, generate, capture and print all required values in one command, then require structured output with `agent(..., {schema})`. An empty sleep output is not evidence of the chosen duration. See [Workflow experiments](workflow-experiments.md).
 
 Failed nodes are retained in the journal and final `failures` list even if the script catches errors or filters `parallel()`'s null results. Final status is `partial_failed` for mixed outcomes and `failed` when all nodes fail; both are error tool results with successful output preserved. `summary.completed` counts successful/cached nodes, not attempted calls. Request retry counts (`rateLimitRetries`) are separate from schema `attempt`.
 

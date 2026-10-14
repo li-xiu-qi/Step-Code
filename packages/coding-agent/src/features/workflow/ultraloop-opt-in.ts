@@ -47,16 +47,22 @@ const TRIGGER_PHRASES: readonly RegExp[] = [
 const OPT_IN_PATTERNS: readonly RegExp[] = [KEYWORD, ...TRIGGER_PHRASES];
 // An explicit request to launch several agents is orchestration consent too. The
 // phrase may sit anywhere in the message, so "麻烦开3个子agent查一下" counts while
-// "先看代码" alone does not.
+// "先看代码" alone does not. The noun must be a fan-out target, not a file or role
+// ("3 agent definition files", "创建3个agent配置文件").
 const COUNTED_AGENT_LAUNCH =
-	/(?:启动|开启|开|创建|派出|spawn|start|launch|run|create)\s*(\d+|[０-９]+|[一二两三四五六七八九十百千]+)\s*个?\s*(?:子\s*agents?|sub-?agents?|子代理|agents?)/iu;
+	/(?:启动|开启|开|创建|派出|spawn|start|launch|run|create)\s*(\d+|[０-９]+|[一二两三四五六七八九十百千]+)\s*个?\s*(?:子\s*agents?|sub-?agents?|子代理|agents?)(?![\w.-])(?!\s*(?:definition|config|file|template|role|type|doc|配置|定义|角色|文件|模板|文档|类型|说明))/iu;
 /** "一/零/半" style counts are not a fan-out request. */
 const SINGULAR_COUNT = /^(?:[一壹零〇半]|1)$/u;
 /** Asking about a request (cost, feasibility, how) is not consent to perform it. */
 const META_QUESTION =
 	/(?:多少钱|多少成本|成本|费用|划算|可行|是否可以|是否|是不是|会不会|该不该|什么意思|怎么|如何|为什么|为啥|how much|what does|is it|should i|can i|do i|how do i|how to|why)/iu;
-/** Refusal or deliberation cancels a counted request anywhere in the message. */
-const REFUSAL = /(?:不要|别|不能|不可以|无需|不需要|不准|禁止|还是|不如|算了)/u;
+/**
+ * Refusal, hedging, or deliberation cancels a counted request. Checked across the
+ * whole message because a false positive here launches agents the user declined,
+ * which costs far more than missing an opt-in the model can still route itself.
+ */
+const REFUSAL =
+	/(?:不要|(?<![特太寻])别|不能|不可以|无需|不需要|不准|禁止|还是|不如|算了|don'?t|do not|never|avoid|no need|rather than|instead of|might|maybe|perhaps|later|whether|not sure|thinking about|wondering)/iu;
 const CLAUSE_BOUNDARY = /[，,。.;；、!！?？\n]/u;
 
 /**
