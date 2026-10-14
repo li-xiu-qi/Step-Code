@@ -83,6 +83,38 @@ describe("Step extension", () => {
 		);
 		expect(setAutoRetryEnabled).not.toHaveBeenCalled();
 	});
+
+	test.each(["approve-for-me", "full-access"] as const)(
+		"does not persist an already enabled native retry preference at startup: %s",
+		(initialPreset) => {
+			const on = vi.fn();
+			const setAutoRetryEnabled = vi.fn();
+			createStepExtension({
+				permission: { env: {}, initialPreset },
+				stepSettings: () => ({
+					getStepSettings: () => ({ fullAccessAcknowledged: true }),
+					setEffectiveStepSettings: vi.fn(),
+				}),
+			})({
+				on,
+				registerProvider: vi.fn(),
+				registerCommand: vi.fn(),
+				sendUserMessage: vi.fn(),
+			} as unknown as ExtensionAPI);
+			const handler = (name: string) => on.mock.calls.filter(([event]) => event === name).at(-1)![1];
+			const ctx = {
+				hasUI: false,
+				ui: { notify: vi.fn(), setStatus: vi.fn() },
+				isIdle: () => true,
+				hasPendingMessages: () => false,
+				autoRetryEnabled: true,
+				setAutoRetryEnabled,
+			};
+			handler("session_start")({}, ctx);
+			handler("session_shutdown")({}, ctx);
+			expect(setAutoRetryEnabled).not.toHaveBeenCalled();
+		},
+	);
 	test.each([
 		{ name: "selected non-Bash interpreter", shellPath: process.execPath, prefix: undefined },
 		{ name: "executed command prefix", shellPath: undefined, prefix: "rm -rf ./build" },
