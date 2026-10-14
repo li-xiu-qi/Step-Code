@@ -1,0 +1,9 @@
+/* Neutral floating surface; mirrors the legacy `.control-popover` surface (styles.css 801-816). */
+.root {
+	z-index: 50;
+	padding: 6px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-overlay);
+	background: var(--surface);
+	box-shadow: 0 16px 42px var(--shadow);
+}

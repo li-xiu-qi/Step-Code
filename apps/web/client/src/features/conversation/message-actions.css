@@ -1,0 +1,35 @@
+/* Per-message action row: copy, vote, fork, then usage and time. */
+.message-actions {
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	margin-top: 7px;
+	color: var(--ink-3);
+}
+.message-action {
+	display: inline-grid;
+	place-items: center;
+	width: var(--control-h-xs);
+	height: var(--control-h-xs);
+	border-radius: var(--radius-chip);
+	color: var(--ink-3);
+	font-size: 11px;
+}
+.message-action:hover {
+	background: var(--hover);
+	color: var(--ink);
+}
+.message-action[aria-pressed="true"] {
+	color: var(--ink);
+}
+.message-actions .message-usage,
+.message-actions .message-time {
+	padding: 0 6px;
+	color: var(--ink-3);
+	font-size: 11px;
+}
+.message-actions .message-usage {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+}

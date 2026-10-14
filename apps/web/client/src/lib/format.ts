@@ -1,0 +1,107 @@
+/**
+ * Pure formatting helpers ported from legacy app.js. None of them reads app
+ * state; strings that were translated in the legacy code are parameters here
+ * (see i18n/index.ts for `formatRelativeTime`, which supplies them).
+ */
+
+/** Collapse whitespace and cut to `limit` characters with an ellipsis (legacy `compact`). */
+export function compact(value: unknown, limit = 120): string {
+	const text = String(value ?? "")
+		.replace(/\s+/g, " ")
+		.trim();
+	return text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
+}
+
+/** One-line `key=value` summary of a tool's arguments (legacy `toolInputSummary`). */
+export function toolInputSummary(input: unknown): string {
+	if (!input || typeof input !== "object") return "无输入摘要";
+	return compact(
+		Object.entries(input as Record<string, unknown>)
+			.map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`)
+			.join(" "),
+	);
+}
+
+/** Longest tool input or output kept for the expanded row; the rest is cut so a huge result cannot stall the page. */
+export const TOOL_DETAIL_LIMIT = 20_000;
+
+/** Cut `text` to TOOL_DETAIL_LIMIT characters, saying how much was dropped. */
+export function clipDetail(text: string): string {
+	return text.length > TOOL_DETAIL_LIMIT
+		? `${text.slice(0, TOOL_DETAIL_LIMIT)}\n… (${text.length - TOOL_DETAIL_LIMIT} more characters)`
+		: text;
+}
+
+/** A tool's arguments in full, one `key: value` per line, for the expanded tool row. */
+export function toolInputDetail(input: unknown): string {
+	if (input === undefined || input === null) return "";
+	if (typeof input !== "object") return clipDetail(String(input));
+	return clipDetail(
+		Object.entries(input as Record<string, unknown>)
+			.map(([key, value]) => {
+				if (typeof value !== "string") return `${key}: ${JSON.stringify(value, null, 2)}`;
+				return value.includes("\n") ? `${key}:\n${value}` : `${key}: ${value}`;
+			})
+			.join("\n"),
+	);
+}
+
+/**
+ * Last path segment, accepting `/` and `\` (legacy `basename`). An empty path
+ * yields "最近" exactly as the legacy code did; callers that need a neutral
+ * placeholder check for an empty path first.
+ */
+export function basename(path: string | undefined | null): string {
+	if (!path) return "最近";
+	return (
+		path
+			.replace(/[\\/]+$/, "")
+			.split(/[\\/]/)
+			.at(-1) || path
+	);
+}
+
+/** Elapsed time as `now` / `5m` / `3h` / `2d` (legacy `relativeTime`). */
+export function relativeTime(
+	value: string | number | Date | undefined,
+	justNowLabel: string,
+	now = Date.now(),
+): string {
+	const timestamp = new Date(value ?? Number.NaN).getTime();
+	if (!Number.isFinite(timestamp)) return "";
+	const elapsed = Math.max(0, now - timestamp);
+	if (elapsed < 60_000) return justNowLabel;
+	if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+	if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+	return `${Math.floor(elapsed / 86_400_000)}d`;
+}
+
+/** 45.9K rather than 45900, so a row stays one line (legacy `formatTokens`). */
+export function formatTokens(count: number): string {
+	if (count < 1000) return String(count);
+	const kilo = count / 1000;
+	return `${kilo >= 100 ? Math.round(kilo) : kilo.toFixed(1)}K`;
+}
+
+/** `512 B` / `1.5 KB` / `2.0 MB` (legacy `formatBytes`). */
+export function formatBytes(size: number): string {
+	if (size < 1024) return `${size} B`;
+	if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+	return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** Directory paths from the root down to the parent of `path` (legacy `ancestorPaths`). */
+export function ancestorPaths(path: string): string[] {
+	const parts = path.split("/");
+	return parts.slice(0, -1).map((_part, index) => parts.slice(0, index + 1).join("/"));
+}
+
+/** Join class names, skipping falsy entries. */
+export function cx(...names: Array<string | false | null | undefined>): string {
+	return names.filter(Boolean).join(" ");
+}
+
+/** True on macOS, used for shortcut labels (legacy `navigator.platform.startsWith("Mac")`). */
+export function isMacPlatform(): boolean {
+	return typeof navigator !== "undefined" && navigator.platform.startsWith("Mac");
+}

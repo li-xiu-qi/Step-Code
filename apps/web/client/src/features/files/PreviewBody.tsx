@@ -1,0 +1,113 @@
+/**
+ * `#previewBody` and `#previewPath` (legacy `renderPreview`, `previewMessage`,
+ * `buildCodeView`; app.js 1771-1873).
+ */
+
+import { type CSSProperties, type ReactNode, useLayoutEffect, useMemo, useRef } from "react";
+import { useT } from "../../i18n";
+import { workspaceApi } from "../../lib/api";
+import { basename, cx, formatBytes } from "../../lib/format";
+import { renderMarkdown } from "../../lib/markdown";
+import { copyText } from "../../state/session";
+import { type PreviewTab, useAppStore } from "../../state/store";
+import { MarkdownView } from "../../ui";
+import { codeViewHtml, isMarkdownPath, PREVIEW_LINE_LIMIT } from "./highlight";
+
+/** The tab the preview shows, or undefined when there are no tabs. */
+export function useActiveTab(): PreviewTab | undefined {
+	return useAppStore((state) => state.preview.tabs[state.preview.active]);
+}
+
+/** Full on-disk path of a tab, in the workspace's own separator style. */
+function fullPath(tab: PreviewTab): string {
+	// Server paths are relative with "/"; show them in the workspace's own style.
+	const separator = tab.cwd.includes("\\") && !tab.cwd.includes("/") ? "\\" : "/";
+	return `${tab.cwd.replace(/[\\/]+$/, "")}${separator}${tab.path.split("/").join(separator)}`;
+}
+
+export function PreviewPath() {
+	const tab = useActiveTab();
+	if (!tab) return <div className="preview-path" id="previewPath" />;
+	const full = fullPath(tab);
+	const name = basename(tab.path);
+	const directory = full.slice(0, -name.length);
+	return (
+		<div className="preview-path" id="previewPath" title={full}>
+			<span>
+				<bdi>{directory}</bdi>
+			</span>
+			<strong>{name}</strong>
+			{tab.file ? <small>{formatBytes(tab.file.size)}</small> : null}
+		</div>
+	);
+}
+
+function PreviewMessage({ children }: { readonly children: ReactNode }) {
+	return <div className="preview-message">{children}</div>;
+}
+
+function CodeView({ content, path }: { readonly content: string; readonly path: string }) {
+	const t = useT();
+	const wrap = useAppStore((state) => state.preview.wrap);
+	const notice = t("linesTruncated", { count: PREVIEW_LINE_LIMIT });
+	const view = useMemo(() => codeViewHtml(content, path, notice), [content, path, notice]);
+	return (
+		<div
+			className={cx("code-view", wrap && "wrap")}
+			style={{ "--line-digits": String(view.digits) } as CSSProperties}
+			// Escaped by highlightLines / codeViewHtml; one string keeps 10 000 lines cheap.
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: legacy .code-line/.tok-* markup, built from escaped text only.
+			dangerouslySetInnerHTML={{ __html: view.html }}
+		/>
+	);
+}
+
+function PreviewContent({ tab }: { readonly tab: PreviewTab }) {
+	const t = useT();
+	const file = tab.file;
+	if (tab.loading) return <PreviewMessage>{t("loadingFile")}</PreviewMessage>;
+	if (tab.error) return <PreviewMessage>{tab.error}</PreviewMessage>;
+	if (!file) return null;
+	if (file.kind === "image")
+		return (
+			<img
+				className="preview-image"
+				alt={basename(file.path)}
+				src={workspaceApi(tab.cwd, "/raw", { path: tab.path })}
+			/>
+		);
+	if (file.kind !== "text")
+		return (
+			<PreviewMessage>
+				{file.kind === "binary" ? t("binaryFile") : t("fileTooLarge", { size: formatBytes(file.size) })}
+			</PreviewMessage>
+		);
+	if (tab.rendered && isMarkdownPath(file.path))
+		return (
+			<MarkdownView
+				className="preview-markdown message-body"
+				html={renderMarkdown(file.content, { code: t("code"), copy: t("copy") })}
+				onCopyCode={(code) => void copyText(code)}
+			/>
+		);
+	return <CodeView content={file.content} path={file.path} />;
+}
+
+export function PreviewBody() {
+	const tabs = useAppStore((state) => state.preview.tabs);
+	const active = useAppStore((state) => state.preview.active);
+	const tab = tabs[active];
+	const bodyRef = useRef<HTMLDivElement>(null);
+
+	// Legacy renderPreview scrolled back to the top on every redraw of the tabs or the body.
+	useLayoutEffect(() => {
+		if (!tabs[active] || !bodyRef.current) return;
+		bodyRef.current.scrollTop = 0;
+	}, [tabs, active]);
+
+	return (
+		<div className="preview-body" id="previewBody" ref={bodyRef}>
+			{tab ? <PreviewContent tab={tab} /> : null}
+		</div>
+	);
+}

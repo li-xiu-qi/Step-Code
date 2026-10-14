@@ -1,0 +1,32 @@
+/* Legacy styles.css 862-878 (`.control-segmented-group`, `.control-segment`). */
+.root {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	border-radius: var(--radius-control);
+	background: var(--surface-soft);
+}
+
+.item {
+	padding: 3px 11px;
+	border: 0;
+	border-radius: var(--radius-tiny);
+	background: none;
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 1.5;
+	cursor: pointer;
+	transition:
+		background-color var(--fast),
+		color var(--fast);
+}
+
+.item:hover {
+	color: var(--ink);
+}
+
+.selected {
+	background: var(--surface);
+	color: var(--ink);
+	box-shadow: 0 1px 3px var(--shadow);
+}

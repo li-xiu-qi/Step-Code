@@ -1,0 +1,66 @@
+import { type ReactNode, useCallback, useEffect } from "react";
+import { relativeTime } from "../lib/format";
+import { appStore, useAppStore } from "../state/store";
+import { type Locale, MESSAGES, type MessageKey } from "./messages";
+
+export { LOCALES, type Locale, type MessageKey, TAG_COLOR_NAMES, type TagColor } from "./messages";
+
+export type TranslationValues = Readonly<Record<string, string | number>>;
+
+/**
+ * Look a key up for `locale`, falling back to zh-CN and then to the key itself,
+ * and substitute `{name}` placeholders (legacy app.js `t`). Keys are typed as
+ * plain strings because the legacy code also builds them dynamically
+ * (`policy.${id}.label`, `feedbackTopic.${topic}`) and relies on the key
+ * fallback to detect a missing translation.
+ */
+export function translate(locale: Locale, key: MessageKey | (string & {}), values: TranslationValues = {}): string {
+	let text = MESSAGES[locale]?.[key] ?? MESSAGES["zh-CN"][key] ?? key;
+	for (const [name, value] of Object.entries(values)) text = text.replace(`{${name}}`, String(value));
+	return text;
+}
+
+/** Translate with the current store locale. Safe outside React (session.ts, actions). */
+export function t(key: MessageKey | (string & {}), values?: TranslationValues): string {
+	return translate(appStore.getState().locale, key, values);
+}
+
+/** t() with an explicit fallback, for strings the kernel already supplies (legacy `tOr`). */
+export function tOr(key: string, fallback: string): string {
+	const value = t(key);
+	return value === key ? fallback : value;
+}
+
+export type TranslateFn = (key: MessageKey | (string & {}), values?: TranslationValues) => string;
+
+/**
+ * Translation function bound to the current locale. Components that call it
+ * re-render when the locale changes, which replaces the legacy `applyLocale`
+ * pass over `[data-i18n]` elements.
+ */
+export function useT(): TranslateFn {
+	const locale = useAppStore((state) => state.locale);
+	return useCallback((key, values) => translate(locale, key, values), [locale]);
+}
+
+/** Current locale, for components that branch on it directly. */
+export function useLocale(): Locale {
+	return useAppStore((state) => state.locale);
+}
+
+/** `relativeTime` with the translated "just now" label. */
+export function formatRelativeTime(value: string | number | Date | undefined): string {
+	return relativeTime(value, t("justNow"));
+}
+
+/**
+ * Keeps `<html lang>` in step with the store locale. Persisting the choice is
+ * `applyLocale` (features/shell/actions.ts); this only mirrors it into the DOM.
+ */
+export function I18nProvider({ children }: { readonly children: ReactNode }): ReactNode {
+	const locale = useLocale();
+	useEffect(() => {
+		document.documentElement.lang = locale;
+	}, [locale]);
+	return children;
+}

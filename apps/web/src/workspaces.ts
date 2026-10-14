@@ -81,8 +81,9 @@ export class WorkspaceRegistry {
 			throw new Error("Folder does not exist");
 		}
 		if (!(await isDirectory(path))) throw new Error("Path is not a directory");
-		if (!this.paths.includes(path)) {
-			this.paths.push(path);
+		// Newest first: the folder just added is the one the user wants to see at the top of the sidebar.
+		if (this.paths[0] !== path) {
+			this.paths = [path, ...this.paths.filter((entry) => entry !== path)];
 			await this.save();
 		}
 		return { path, name: basename(path) || path, available: true };

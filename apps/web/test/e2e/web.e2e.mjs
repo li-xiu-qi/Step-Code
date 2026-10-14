@@ -496,9 +496,9 @@ test(
 		await until(() => !$("#userPopover").hidden, "settings popover");
 		return {
 			label: $("#userMenuButton").textContent.trim(),
-			note: $("#loginNote").textContent,
-			command: $("#loginCommand").textContent,
-			// The account block and the redundant settings row are gone.
+			// The account block, the redundant settings row and the login note
+			// (removed in cdf3bb3) are gone; the credential report is API-only.
+			login: !!$("#loginNote") || !!$("#loginCommand"),
 			account: !!$(".user-popover-account"),
 			gear: !!$("#userMenuButton use[href='#i-settings']"),
 		};
@@ -506,9 +506,7 @@ test(
     assert.equal(shown.label, "设置")
     assert.equal(shown.gear, true)
     assert.equal(shown.account, false)
-    assert.equal(shown.command, "step login")
-    assert.match(shown.summary, /已登录：step · step_plan/)
-    assert.match(shown.note, /auth\.json/)
+    assert.equal(shown.login, false)
 
     // The rows open their submenu on the first click: they must not bubble into
     // the document handler that closes the popover on an outside click.

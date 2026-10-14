@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { build } from "esbuild"
@@ -10,108 +10,151 @@ const generatedCatalogDataDir = join(
   "packages/providers/src/providers/data",
 )
 
-function checkWebPublicSurface() {
-  const webPublic = join(process.cwd(), "apps/web/public")
-  const index = readFileSync(join(webPublic, "index.html"), "utf8")
-  const app = readFileSync(join(webPublic, "app.js"), "utf8")
-  const styles = readFileSync(join(webPublic, "styles.css"), "utf8")
+function listFiles(directory, extensions) {
+  const files = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name)
+    if (entry.isDirectory()) files.push(...listFiles(path, extensions))
+    else if (extensions.some((extension) => entry.name.endsWith(extension)))
+      files.push(path)
+  }
+  return files
+}
+
+/**
+ * The Web client is a React + Vite app under apps/web/client. These guards keep
+ * the first-release surface from silently regressing: the source must still
+ * talk to the session API, carry the structural ids and classes, keep the
+ * design tokens and the two-column layout, and leave out unbuilt UI.
+ */
+function checkWebClientSurface() {
+  const clientRoot = join(process.cwd(), "apps/web/client")
+  const sourceRoot = join(clientRoot, "src")
+  const index = readFileSync(join(clientRoot, "index.html"), "utf8")
   if (
-    !index.includes('src="/app.js"') ||
-    !index.includes('href="/styles.css"')
+    !index.includes('id="root"') ||
+    !index.includes('src="/src/main.tsx"')
   ) {
     throw new Error(
-      "apps/web/public/index.html does not reference the Web assets",
+      "apps/web/client/index.html does not mount the React entry (#root, /src/main.tsx)",
     )
   }
-  if (!app.includes("EventSource") || !app.includes("/api/v1/sessions")) {
+  const sourceFiles = listFiles(sourceRoot, [".ts", ".tsx"])
+  const source = sourceFiles
+    .map((path) => readFileSync(path, "utf8"))
+    .join("\n")
+  const markup = sourceFiles
+    .filter((path) => path.endsWith(".tsx"))
+    .map((path) => readFileSync(path, "utf8"))
+    .join("\n")
+  if (!source.includes("EventSource") || !source.includes("/api/v1/sessions")) {
     throw new Error(
-      "apps/web/public/app.js does not contain the session stream client",
+      "apps/web/client/src does not contain the session stream client",
     )
   }
+  for (const required of [
+    "/policy",
+    "/model",
+    "/files",
+    "/auth/logout",
+    "renderMarkdown",
+    "workspaceBrowserModal",
+    "stepcode.theme",
+    "stepcode.locale",
+  ]) {
+    if (!source.includes(required)) {
+      throw new Error(
+        `apps/web/client/src is missing a first-release interaction: ${required}`,
+      )
+    }
+  }
+  const escape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  // A class may sit in a plain string or in the first string of cx(...).
+  const hasClass = (name) =>
+    new RegExp(
+      `className=\\{?(?:cx\\()?"(?:[^"]*\\s)?${escape(name)}(?:\\s[^"]*)?"`,
+    ).test(markup)
+  const hasId = (name) => markup.includes(`id="${name}"`)
+  const missing = [
+    ...["sidebar", "main", "composer-card", "view-tabs"].filter(
+      (name) => !hasClass(name),
+    ),
+    ...[
+      "workspaceButton",
+      "workspaceBrowserModal",
+      "userPopover",
+      "themeMenuItem",
+      "languageMenuItem",
+      "logoutMenuItem",
+    ].filter((name) => !hasId(name)),
+    ...["https://platform.stepfun.com/step-plan"].filter(
+      (url) => !markup.includes(url),
+    ),
+  ]
+  if (missing.length) {
+    throw new Error(
+      `apps/web/client/src is missing the Kimi-style first-release structure: ${missing.join(", ")}`,
+    )
+  }
+  const globalCssPath = join(sourceRoot, "styles/global.css")
+  const globalCss = readFileSync(globalCssPath, "utf8")
   if (
-    !app.includes("/policy") ||
-    !app.includes("/model") ||
-    !app.includes("/files") ||
-    !app.includes("/auth/logout") ||
-    !app.includes("renderMarkdown") ||
-    !app.includes("workspaceBrowserModal") ||
-    !app.includes("stepcode.theme") ||
-    !app.includes("stepcode.locale")
+    !globalCss.includes("--sidebar: #f7f7f8") ||
+    !globalCss.includes("--ink: #171718") ||
+    !globalCss.includes("--composer-width: 760px")
   ) {
     throw new Error(
-      "apps/web/public/app.js is missing a first-release interaction",
-    )
-  }
-  if (
-    !index.includes('class="sidebar"') ||
-    !index.includes('class="main"') ||
-    !index.includes('class="composer-card"') ||
-    !index.includes('id="workspaceButton"') ||
-    !index.includes('id="workspaceBrowserModal"') ||
-    !index.includes('id="userPopover"') ||
-    !index.includes('class="view-tabs"') ||
-    !index.includes('id="themeMenuItem"') ||
-    !index.includes('id="languageMenuItem"') ||
-    !index.includes('id="logoutMenuItem"') ||
-    !index.includes('href="https://platform.stepfun.com/step-plan"')
-  ) {
-    throw new Error(
-      "apps/web/public/index.html is missing the Kimi-style first-release structure",
-    )
-  }
-  if (
-    !styles.includes("--sidebar: #f7f7f8") ||
-    !styles.includes("--ink: #171718") ||
-    !styles.includes("--composer-width: 760px")
-  ) {
-    throw new Error(
-      "apps/web/public/styles.css is missing the Kimi-style first-release tokens",
+      "apps/web/client/src/styles/global.css is missing the Kimi-style first-release tokens",
     )
   }
   // A single stray brace silently drops every rule after it, which is how the
   // search dialog once lost `position: fixed` and flowed into the page layout.
   // Nothing above would notice: the strings are all still present. Balance is
   // cheap to assert and catches the whole class of failure.
-  let braceDepth = 0
-  for (const character of styles.replace(/\/\*[\s\S]*?\*\//g, "")) {
-    if (character === "{") braceDepth += 1
-    else if (character === "}") braceDepth -= 1
-    if (braceDepth < 0) {
-      throw new Error(
-        "apps/web/public/styles.css has a closing brace with no matching opening brace",
-      )
+  const stylesheets = listFiles(sourceRoot, [".css"])
+  let styles = ""
+  for (const path of stylesheets) {
+    const css = readFileSync(path, "utf8")
+    styles += `${css}\n`
+    let braceDepth = 0
+    for (const character of css.replace(/\/\*[\s\S]*?\*\//g, "")) {
+      if (character === "{") braceDepth += 1
+      else if (character === "}") braceDepth -= 1
+      if (braceDepth < 0) {
+        throw new Error(
+          `${path} has a closing brace with no matching opening brace`,
+        )
+      }
+    }
+    if (braceDepth !== 0) {
+      throw new Error(`${path} has ${braceDepth} unclosed brace(s)`)
     }
   }
-  if (braceDepth !== 0) {
-    throw new Error(
-      `apps/web/public/styles.css has ${braceDepth} unclosed brace(s)`,
-    )
-  }
   if (
-    !styles.includes(
+    !globalCss.includes(
       "grid-template-columns: var(--sidebar-width) minmax(0, 1fr)",
     ) ||
-    styles.includes("changes-panel")
+    styles.includes("changes-panel") ||
+    markup.includes("changes-panel")
   ) {
     throw new Error(
-      "apps/web/public/styles.css does not preserve the two-column no-right-rail layout",
+      "apps/web/client does not preserve the two-column no-right-rail layout",
     )
   }
-  if (index.includes('class="topbar"') || styles.includes(".topbar {")) {
-    throw new Error(
-      "apps/web/public still contains the removed main-area header",
-    )
+  if (hasClass("topbar") || styles.includes(".topbar {")) {
+    throw new Error("apps/web/client still contains the removed main-area header")
   }
   // Attachments shipped, so the guard that kept them out of the first release
   // no longer applies. The rest are still unbuilt.
   for (const forbidden of [
     "hudToggle",
+    'className="hud"',
     'class="hud"',
     "voiceButton",
     "cronPlaceholder",
   ]) {
-    if (index.includes(forbidden) || app.includes(forbidden)) {
-      throw new Error(`apps/web/public contains post-release UI: ${forbidden}`)
+    if (index.includes(forbidden) || source.includes(forbidden)) {
+      throw new Error(`apps/web/client contains post-release UI: ${forbidden}`)
     }
   }
 }
@@ -136,7 +179,7 @@ const generatedCatalogDataPlugin = {
 }
 
 try {
-  checkWebPublicSurface()
+  checkWebClientSurface()
   // Browser-safety smoke: bundle the browser-facing package exports and fail on
   // any Node-only runtime import leaking into them. The Step-only build has no
   // built-in providers, so the former selective-provider tree-shake assertions

@@ -1,0 +1,32 @@
+/* Mirrors legacy styles.css 1142-1144 (`.primary-action`, `.secondary-action`). */
+.root {
+	cursor: pointer;
+}
+
+.plain {
+	border: 0;
+	background: none;
+}
+
+.primary,
+.secondary {
+	min-height: 40px;
+	padding: 0 17px;
+	border-radius: var(--radius-panel);
+}
+
+.primary {
+	border: 0;
+	background: var(--ink);
+	color: var(--canvas);
+}
+
+.secondary {
+	border: 1px solid var(--line);
+	background: var(--surface);
+}
+
+.root:disabled {
+	cursor: not-allowed;
+	opacity: 0.4;
+}

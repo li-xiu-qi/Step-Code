@@ -1,0 +1,252 @@
+/*
+ * Shell styles, ported verbatim from legacy public/styles.css:
+ * 179-189 (sidebar show button), 602-673 (user area, settings popover, submenus),
+ * 1278-1296 (error toast), 1297-1331 (auth banner), 1389-1415 (logged-out overlay, login rows).
+ */
+
+.sidebar-show {
+	position: absolute;
+	top: 14px;
+	left: 14px;
+	z-index: 20;
+	display: none;
+	border: 1px solid var(--line);
+	background: var(--surface);
+	box-shadow: 0 4px 14px var(--shadow);
+}
+.app.sidebar-hidden .sidebar-show {
+	display: inline-grid;
+}
+
+.user-area {
+	position: relative;
+	flex: none;
+	padding: 8px;
+	border-top: 1px solid var(--line);
+}
+.user-button {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 44px;
+	padding: 5px 8px;
+	border-radius: var(--radius-menu);
+	color: var(--ink-2);
+	text-align: left;
+}
+.user-button:hover,
+.user-button[aria-expanded="true"] {
+	background: var(--hover);
+}
+.user-name {
+	flex: 1;
+	overflow: hidden;
+	font-weight: 550;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.user-popover {
+	position: absolute;
+	left: 8px;
+	right: 8px;
+	bottom: 62px;
+	z-index: 12;
+	padding: 7px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-overlay);
+	background: var(--surface);
+	box-shadow: 0 12px 32px var(--shadow);
+}
+.user-menu-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: 38px;
+	margin-top: 3px;
+	padding: 0 9px;
+	border-radius: var(--radius-control);
+	text-align: left;
+	text-decoration: none;
+}
+.user-menu-item:hover {
+	background: var(--hover);
+}
+.user-menu-item small {
+	margin-left: auto;
+	color: var(--ink-3);
+	font-size: 10px;
+}
+.user-menu-item > .icon:first-child {
+	color: var(--ink-2);
+}
+.user-menu-item .menu-trailing,
+.user-menu-item .menu-chevron {
+	margin-left: auto;
+	color: var(--ink-3);
+}
+.user-menu-item small + .menu-chevron {
+	margin-left: 2px;
+}
+/* The chevron reads as "opens below" once the list is showing. */
+.user-menu-item .menu-chevron {
+	transition: transform var(--fast);
+}
+.user-menu-item[aria-expanded="true"] .menu-chevron {
+	transform: rotate(90deg);
+}
+.user-menu-item.danger {
+	color: var(--danger);
+}
+/*
+ * The choice list unfolds inside the popover rather than beside it: the sidebar
+ * clips its children, so anything anchored past its right edge was invisible.
+ */
+.user-submenu {
+	margin: 1px 0 3px;
+}
+.user-submenu button {
+	display: flex;
+	align-items: center;
+	width: 100%;
+	min-height: 30px;
+	padding: 0 9px 0 38px;
+	border-radius: var(--radius-input);
+	color: var(--ink-2);
+	text-align: left;
+}
+.user-submenu button:hover {
+	background: var(--hover);
+}
+.user-submenu button i {
+	display: none;
+	width: 7px;
+	height: 7px;
+	margin-left: auto;
+	border-radius: 50%;
+	background: var(--ink);
+}
+.user-submenu button.active i {
+	display: block;
+}
+
+.error-toast {
+	position: absolute;
+	right: 20px;
+	bottom: 20px;
+	z-index: 40;
+	max-width: 390px;
+	padding: 10px 13px;
+	border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line));
+	border-radius: var(--radius-surface);
+	background: var(--danger-surface);
+	color: var(--danger);
+	box-shadow: 0 8px 24px rgb(0 0 0 / 9%);
+	font-size: 12px;
+}
+.error-toast[data-tone="neutral"] {
+	border-color: var(--line);
+	background: var(--surface);
+	color: var(--ink-2);
+}
+/*
+ * Shown when the session cookie stops being accepted. Without it a failed
+ * exchange just leaves an empty sidebar and an empty model list, which reads
+ * as "my data disappeared" rather than "you are logged out".
+ */
+.auth-banner {
+	position: absolute;
+	top: 14px;
+	left: 50%;
+	z-index: 60;
+	display: grid;
+	gap: 6px;
+	width: min(420px, calc(100vw - 28px));
+	padding: 12px 14px;
+	transform: translateX(-50%);
+	border: 1px solid color-mix(in srgb, var(--attention) 45%, var(--line));
+	border-radius: var(--radius-surface);
+	background: var(--attention-surface);
+	color: var(--ink);
+	box-shadow: 0 10px 30px var(--shadow);
+	font-size: 12px;
+	line-height: 1.6;
+}
+.auth-banner strong {
+	font-size: 13px;
+}
+.auth-banner span {
+	color: var(--ink-2);
+}
+.auth-banner-reload {
+	justify-self: start;
+	padding: 5px 11px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-control);
+	background: var(--surface);
+	color: var(--ink);
+	font-size: 12px;
+}
+.auth-banner-reload:hover {
+	background: var(--hover);
+}
+.logged-out-overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 80;
+	display: grid;
+	place-items: center;
+	padding: 24px;
+	background: rgb(0 0 0 / 30%);
+	backdrop-filter: blur(4px);
+}
+.user-popover-login {
+	display: grid;
+	gap: 5px;
+	padding: 6px 9px 2px;
+}
+.user-popover-login small {
+	color: var(--ink-3);
+	font-size: 11px;
+}
+.user-popover-login .settings-note {
+	margin-top: 0;
+	color: var(--ink-3);
+	font-size: 10px;
+	line-height: 1.5;
+}
+.settings-login {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.settings-login code {
+	padding: 4px 7px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-input);
+	background: var(--code-surface);
+	color: var(--ink-2);
+	font: 11px / 1.4 var(--mono);
+}
+.logged-out-overlay {
+	background: var(--canvas);
+}
+.logged-out-overlay > div {
+	display: grid;
+	justify-items: center;
+	text-align: center;
+}
+.logged-out-overlay .brand-mark {
+	width: 42px;
+	height: 42px;
+	margin-bottom: 14px;
+}
+.logged-out-overlay h2 {
+	font-size: 19px;
+}
+.logged-out-overlay p {
+	max-width: 360px;
+	margin-top: 6px;
+	color: var(--ink-2);
+}

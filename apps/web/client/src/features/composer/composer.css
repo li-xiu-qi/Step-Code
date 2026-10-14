@@ -1,0 +1,484 @@
+/*
+ * Composer: legacy styles.css 755-911 (composer card, textarea, control row,
+ * shared .control-* popovers), 989-1020 (attachments, send/stop buttons), 1429
+ * (.control-segment-none) and 1461-1481 (usage popover), ported verbatim.
+ * `.chevron` (912) lives in styles/global.css; `.panel-section` (used inside
+ * the usage popover) is the conversation feature's task-panel rule.
+ */
+.composer-zone {
+	flex: none;
+	padding: 10px var(--gutter) 22px;
+}
+.composer {
+	width: 100%;
+	max-width: var(--composer-width);
+	margin: 0 auto;
+}
+.composer-card {
+	position: relative;
+	z-index: 2;
+	padding: 16px 14px 11px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-card);
+	background: var(--surface);
+	box-shadow: 0 7px 24px rgb(0 0 0 / 7%);
+}
+.composer-card:focus-within {
+	border-color: var(--focus-border);
+	box-shadow: 0 9px 28px rgb(0 0 0 / 9%);
+}
+.composer textarea {
+	display: block;
+	width: 100%;
+	height: var(--textarea-min-h);
+	padding: 2px var(--textarea-pad-x);
+	resize: none;
+	overflow: auto;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	font-size: 15px;
+	line-height: 1.65;
+}
+.composer textarea::placeholder {
+	color: var(--ink-3);
+}
+.composer-controls {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 8px;
+}
+.composer-right {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	margin-left: auto;
+}
+.control-select {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	height: var(--control-h);
+	padding: 0 var(--control-pad-x);
+	border-radius: var(--radius-row);
+	color: var(--ink-2);
+	transition:
+		background-color var(--fast),
+		color var(--fast);
+}
+.control-select:hover {
+	color: var(--ink);
+	background: var(--surface-soft);
+}
+.control-select select {
+	max-width: var(--control-select-max-w);
+	border: 0;
+	outline: 0;
+	background: transparent;
+	cursor: pointer;
+}
+/*
+ * Shared popover used by the permission, model, thinking-effort and mode
+ * pickers. One presentation, four payloads, so a new picker is a render
+ * function rather than another copy of the positioning and dismissal rules.
+ */
+.control-menu {
+	position: relative;
+}
+.control-popover {
+	position: absolute;
+	bottom: calc(100% + 8px);
+	left: 0;
+	z-index: 50;
+	width: max-content;
+	min-width: 100%;
+	max-width: min(340px, calc(100vw - 32px));
+	max-height: min(420px, 60vh);
+	overflow-y: auto;
+	padding: 6px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-overlay);
+	background: var(--surface);
+	box-shadow: 0 16px 42px var(--shadow);
+}
+.control-popover[data-align="right"] {
+	left: auto;
+	right: 0;
+}
+.control-popover-search {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	margin: 2px 2px 6px;
+	padding: 0 8px;
+	height: var(--control-h-sm);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	color: var(--ink-3);
+}
+.control-popover-search:focus-within {
+	border-color: var(--focus-border);
+}
+.control-popover-search input {
+	width: 100%;
+	border: 0;
+	outline: 0;
+	background: transparent;
+	font-size: 12px;
+}
+.control-option {
+	display: flex;
+	align-items: flex-start;
+	gap: 9px;
+	width: 100%;
+	padding: 7px 9px;
+	border-radius: var(--radius-row);
+	text-align: left;
+}
+.control-option:hover {
+	background: var(--hover);
+}
+.control-option[aria-selected="true"] {
+	background: var(--selected);
+}
+.control-option-icon {
+	flex: none;
+	margin-top: 1px;
+	color: var(--ink-2);
+}
+.control-option[aria-selected="true"] .control-option-icon {
+	color: var(--ink);
+}
+.control-option-body {
+	display: grid;
+	gap: 1px;
+	min-width: 0;
+}
+.control-option-title {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	font-size: 13px;
+	font-weight: 550;
+}
+.control-option-desc {
+	color: var(--ink-3);
+	font-size: 11px;
+	line-height: 1.5;
+}
+.control-option-meta {
+	display: flex;
+	gap: 8px;
+	color: var(--ink-3);
+	font-size: 10px;
+}
+.control-option-check {
+	flex: none;
+	margin-top: 3px;
+	margin-left: auto;
+	color: var(--ink);
+}
+.control-option-pin {
+	flex: none;
+	margin-top: 2px;
+	margin-left: auto;
+	padding: 2px;
+	border-radius: var(--radius-tiny);
+	color: var(--ink-3);
+}
+.control-option-pin:hover {
+	background: var(--selected);
+	color: var(--ink);
+}
+.control-option-pin[aria-pressed="true"] {
+	color: var(--attention);
+}
+.control-popover-empty {
+	padding: 10px 9px;
+	color: var(--ink-3);
+	font-size: 12px;
+}
+.control-popover-group {
+	padding: 7px 9px 3px;
+	color: var(--ink-3);
+	font-size: 10px;
+	font-weight: 600;
+}
+.model-control select {
+	color: var(--ink);
+	font-weight: 550;
+}
+/*
+ * Thinking effort as a segmented control rather than a list: there are at most
+ * seven options and they are a single choice, so a row of buttons reads faster
+ * than a stack of rows.
+ */
+.control-segmented {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	padding: 4px 9px 2px;
+}
+.control-segmented-label {
+	flex: none;
+	color: var(--ink-2);
+	font-size: 12px;
+}
+.control-segmented-group {
+	display: flex;
+	gap: 2px;
+	padding: 2px;
+	border-radius: var(--radius-control);
+	background: var(--surface-soft);
+}
+.control-segment {
+	padding: 3px 11px;
+	border-radius: var(--radius-tiny);
+	color: var(--ink-2);
+	font-size: 12px;
+	line-height: 1.5;
+	transition:
+		background-color var(--fast),
+		color var(--fast);
+}
+.control-segment:hover {
+	color: var(--ink);
+}
+.control-segment[aria-pressed="true"] {
+	background: var(--surface);
+	color: var(--ink);
+	box-shadow: 0 1px 3px var(--shadow);
+}
+/* Hint and the "more models" / "back" rows that close the panel. */
+.control-popover-note {
+	padding: 6px 9px 2px;
+	color: var(--ink-3);
+	font-size: 11px;
+	line-height: 1.6;
+}
+.control-popover-more {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	margin-top: 4px;
+	padding: 0 9px;
+	height: var(--control-h-sm);
+	border-top: 1px solid var(--line);
+	border-radius: 0 0 var(--radius-row) var(--radius-row);
+	color: var(--ink-2);
+	font-size: 12px;
+}
+.control-popover-more:hover {
+	background: var(--hover);
+	color: var(--ink);
+}
+.control-popover-more > span {
+	flex: 1;
+	text-align: left;
+}
+.control-popover-more > :last-child {
+	margin-left: auto;
+}
+/* The effort block that shares the model panel. */
+.control-popover-section {
+	margin-top: 5px;
+	padding-top: 5px;
+	border-top: 1px solid var(--line);
+}
+/* Inline goal entry, shown only while goal mode is being switched on. */
+.control-popover-goal {
+	padding: 4px 7px 2px;
+}
+.control-popover-goal input {
+	width: 100%;
+	height: var(--control-h-sm);
+	padding: 0 9px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-control);
+	outline: 0;
+	background: var(--surface);
+	font-size: 12px;
+}
+.control-popover-goal input:focus {
+	border-color: var(--focus-border);
+}
+/* Pending attachments, shown between the textarea and the control row. */
+.attachment-list {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin-top: 8px;
+}
+.attachment-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	max-width: 240px;
+	height: var(--control-h-xs);
+	padding: 0 4px 0 8px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-pill);
+	background: var(--surface-soft);
+	color: var(--ink-2);
+	font-size: 11px;
+}
+.attachment-chip > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.attachment-chip button {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 18px;
+	height: 18px;
+	border-radius: 50%;
+	color: var(--ink-3);
+}
+.attachment-chip button:hover {
+	background: var(--selected);
+	color: var(--ink);
+}
+.send-button {
+	display: grid;
+	place-items: center;
+	flex: none;
+	width: 36px;
+	height: var(--control-h-lg);
+	border-radius: 50%;
+	background: var(--ink);
+	color: var(--surface);
+}
+.send-button:hover {
+	opacity: 0.86;
+}
+.send-button:disabled {
+	cursor: not-allowed;
+	opacity: 0.28;
+}
+.stop-button {
+	height: var(--control-h);
+	padding: 0 var(--control-pad-x);
+	border-radius: var(--radius-row);
+	color: var(--danger);
+	font-size: 12px;
+}
+.stop-button:hover {
+	background: var(--danger-surface);
+}
+.control-segment-none {
+	padding: 3px 4px;
+	color: var(--ink-3);
+	font-size: 11px;
+}
+/* ===== token 用量按钮与弹层 ===== */
+.usage-popover {
+	width: 280px;
+	max-width: calc(100vw - 32px);
+}
+.usage-head {
+	padding: 10px 12px 6px;
+	font-size: 11px;
+	opacity: 0.65;
+	letter-spacing: 0.04em;
+}
+.usage-total {
+	display: flex;
+	align-items: baseline;
+	gap: 6px;
+	padding: 0 12px 8px;
+}
+.usage-total b {
+	font-size: 22px;
+	font-weight: 700;
+}
+.usage-total span {
+	font-size: 11px;
+	opacity: 0.6;
+}
+.usage-bars {
+	padding: 0 12px 4px;
+	display: grid;
+	gap: 6px;
+}
+.usage-bar-row {
+	display: grid;
+	grid-template-columns: 34px 1fr 52px;
+	align-items: center;
+	gap: 8px;
+	font-size: 11.5px;
+}
+.usage-bar-row .bar {
+	height: 6px;
+	border-radius: 999px;
+	background: var(--hover);
+	overflow: hidden;
+}
+.usage-bar-row .bar i {
+	display: block;
+	height: 100%;
+	border-radius: 999px;
+}
+.usage-bar-row .val {
+	text-align: right;
+	opacity: 0.75;
+}
+.usage-budget {
+	margin: 8px 12px 4px;
+}
+.usage-budget-track {
+	height: 5px;
+	border-radius: 999px;
+	background: var(--hover);
+	overflow: hidden;
+}
+.usage-budget-fill {
+	height: 100%;
+	border-radius: 999px;
+	background: #7a5cb0;
+}
+.usage-budget-label {
+	display: flex;
+	justify-content: space-between;
+	font-size: 11px;
+	opacity: 0.7;
+	padding-top: 4px;
+}
+.usage-recent {
+	padding: 6px 6px 4px;
+}
+.usage-recent .panel-section {
+	padding: 2px 6px 4px;
+}
+.usage-recent .row {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: 8px;
+	font-size: 12px;
+}
+.usage-recent .row:hover {
+	background: var(--hover);
+}
+.usage-recent .row .n {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.usage-recent .row .v {
+	flex: none;
+	opacity: 0.7;
+}
+/*
+ * Not in legacy: the pin toggle was a <button> nested inside the option button
+ * (invalid HTML that React rejects), so it is now a role="button" span. Give it
+ * the cursor and box a <button> had.
+ */
+.control-option-pin {
+	display: inline-block;
+	cursor: pointer;
+}

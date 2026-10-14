@@ -34,9 +34,26 @@ import {
 import { WORKSPACES_FILE, WorkspaceRegistry } from "./workspaces.ts";
 
 const moduleRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const publicRoot = existsSync(join(moduleRoot, "public"))
-	? join(moduleRoot, "public")
-	: join(moduleRoot, "..", "public");
+/**
+ * The built browser client. `vite build` writes it to dist/public, which sits
+ * beside dist/server.js; when the server runs from source (tsx src/server.ts)
+ * the same build is one level up. A desktop shell may point elsewhere.
+ */
+const publicRoot = resolve(
+	process.env.STEPCODE_WEB_PUBLIC_DIR?.trim() ||
+		(existsSync(join(moduleRoot, "public")) ? join(moduleRoot, "public") : join(moduleRoot, "..", "dist", "public")),
+);
+const STATIC_CONTENT_TYPES: Readonly<Record<string, string>> = {
+	".html": "text/html; charset=utf-8",
+	".css": "text/css; charset=utf-8",
+	".js": "text/javascript; charset=utf-8",
+	".json": "application/json; charset=utf-8",
+	".map": "application/json; charset=utf-8",
+	".svg": "image/svg+xml",
+	".png": "image/png",
+	".ico": "image/x-icon",
+	".woff2": "font/woff2",
+};
 const port = Number.parseInt(process.env.STEPCODE_WEB_PORT ?? "3077", 10);
 const SECRET_FILE = "web-auth-secret";
 const authSecretPath = process.env.STEPCODE_WEB_AUTH_SECRET?.trim() || join(resolveStepConfigRoot(), SECRET_FILE);
@@ -117,13 +134,11 @@ async function serveStatic(_request: IncomingMessage, response: ServerResponse, 
 	try {
 		const info = await stat(target);
 		if (!info.isFile()) return error(response, 404, "Not found");
-		const contentType =
-			extname(target) === ".css"
-				? "text/css; charset=utf-8"
-				: extname(target) === ".js"
-					? "text/javascript; charset=utf-8"
-					: "text/html; charset=utf-8";
-		response.writeHead(200, { "content-type": contentType, "cache-control": "no-cache" });
+		const contentType = STATIC_CONTENT_TYPES[extname(target).toLowerCase()] ?? "application/octet-stream";
+		// Vite content-hashes everything under /assets/, so those names never change
+		// meaning; index.html must be revalidated to pick up a new build.
+		const cacheControl = relativePath.startsWith("assets/") ? "public, max-age=31536000, immutable" : "no-cache";
+		response.writeHead(200, { "content-type": contentType, "cache-control": cacheControl });
 		createReadStream(target).pipe(response);
 	} catch {
 		error(response, 404, "Not found");

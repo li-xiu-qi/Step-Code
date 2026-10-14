@@ -1,0 +1,30 @@
+// CSS order matters: tokens and base rules, then the ui/ CSS Modules (via the
+// barrel), then feature CSS (imported by the features through App). Feature
+// rules use the legacy class names and must be able to override the primitives.
+import "./styles/global.css";
+import "./ui";
+
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { App } from "./App";
+import { openTree } from "./features/files/actions";
+import { applyLocale, applyTheme } from "./features/shell/actions";
+import { applyHostAttributes } from "./platform/host";
+import { bootstrap } from "./state/session";
+import { getState } from "./state/store";
+
+applyHostAttributes();
+// Before the first render, as the legacy script did, so the page never paints
+// in the wrong theme or language.
+applyTheme(getState().theme, false);
+applyLocale(getState().locale, false);
+
+const container = document.getElementById("root");
+if (!container) throw new Error("#root is missing from index.html");
+createRoot(container).render(
+	<StrictMode>
+		<App />
+	</StrictMode>,
+);
+
+void bootstrap({ openTree });

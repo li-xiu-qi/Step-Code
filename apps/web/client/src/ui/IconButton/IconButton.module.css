@@ -1,0 +1,21 @@
+/* Legacy styles.css 168-178 (`.icon-button`). */
+.root {
+	display: inline-grid;
+	place-items: center;
+	flex: none;
+	width: var(--control-h);
+	height: var(--control-h);
+	border: 0;
+	border-radius: var(--radius-control);
+	background: none;
+	color: var(--ink-2);
+	cursor: pointer;
+	transition:
+		background-color var(--fast),
+		color var(--fast);
+}
+
+.root:hover {
+	color: var(--ink);
+	background: var(--hover);
+}

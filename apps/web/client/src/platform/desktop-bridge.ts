@@ -1,0 +1,27 @@
+/**
+ * Contract between the Web client and a desktop host (apps/desktop).
+ *
+ * The desktop preload script exposes an object of this shape as
+ * `window.stepcodeDesktop`. In a plain browser the property is absent and the
+ * client falls back to the server-side equivalents. Type-only: the desktop app
+ * imports it from `@step-harness/web/desktop-bridge` so both sides share one
+ * definition.
+ */
+export interface StepcodeDesktopBridge {
+	/** Host operating system, as reported by Node's `process.platform`. */
+	readonly platform: "darwin" | "win32" | "linux";
+	/** Desktop application version. */
+	readonly version: string;
+	/** Open the native folder chooser. Resolves to an absolute path, or null when cancelled. */
+	pickDirectory(options?: { readonly title?: string; readonly defaultPath?: string }): Promise<string | null>;
+	/** Open an http(s) URL in the system browser. */
+	openExternal(url: string): Promise<void>;
+	/** Reveal a file or folder in Finder / Explorer / the file manager. */
+	revealPath(path: string): Promise<void>;
+}
+
+declare global {
+	interface Window {
+		stepcodeDesktop?: StepcodeDesktopBridge;
+	}
+}

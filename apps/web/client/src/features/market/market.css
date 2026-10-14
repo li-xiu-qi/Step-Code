@@ -1,0 +1,154 @@
+/* Mid-pane cron / plugin-market views (remote commit 4aea0f8, styles.css). */
+.market-view {
+	position: absolute;
+	inset: 0;
+	z-index: 15;
+	display: none;
+	flex-direction: column;
+	background: var(--canvas);
+}
+.market-view.open {
+	display: flex;
+}
+.market-header {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 12px;
+	padding: 14px 20px;
+	border-bottom: 1px solid var(--line);
+}
+.market-header strong {
+	font-size: 15px;
+}
+.market-search {
+	flex: 1;
+	max-width: 280px;
+	height: var(--control-h-md);
+	margin-left: auto;
+	padding: 0 12px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: var(--surface-soft);
+	transition:
+		border-color 120ms ease,
+		background-color 120ms ease,
+		box-shadow 120ms ease;
+}
+.market-search:hover {
+	border-color: var(--line-strong);
+}
+.market-search:focus-within {
+	border-color: var(--focus-border);
+	background: var(--surface);
+	box-shadow: 0 0 0 3px var(--accent-ring);
+}
+.market-search input {
+	height: 100%;
+	color: var(--ink);
+	font-size: 13px;
+}
+.market-search input:focus,
+.market-search input:focus-visible {
+	outline: none;
+}
+.market-search input::placeholder {
+	color: var(--ink-3);
+}
+/* The native clear button looks out of place in the pill. */
+.market-search input::-webkit-search-cancel-button {
+	-webkit-appearance: none;
+}
+.market-grid {
+	display: grid;
+	flex: 1;
+	grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+	align-content: start;
+	gap: 12px;
+	padding: 18px 20px;
+	overflow: auto;
+}
+.market-card {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 14px;
+	border: 1px solid var(--line);
+	border-radius: 12px;
+	background: var(--surface);
+}
+.market-card:hover {
+	border-color: var(--line-strong);
+}
+.market-card .card-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.market-card .card-icon {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	width: 34px;
+	height: 34px;
+	border: 1px solid var(--line);
+	border-radius: 9px;
+	background: var(--surface-soft);
+}
+.market-card .card-title {
+	font-size: 13.5px;
+	font-weight: 600;
+}
+.market-card .card-desc {
+	flex: 1;
+	font-size: 12px;
+	line-height: 1.55;
+	opacity: 0.7;
+}
+.market-card .card-foot {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+}
+.market-card .card-meta {
+	font-size: 11px;
+	opacity: 0.55;
+}
+.market-card .card-action {
+	padding: 4px 12px;
+	border: 1px solid var(--line);
+	border-radius: 999px;
+	background: transparent;
+	font-size: 12px;
+	cursor: pointer;
+}
+.market-card .card-action.installed {
+	border-color: #2fa96e;
+	color: #2fa96e;
+	cursor: default;
+}
+.market-note {
+	flex: none;
+	padding: 10px 20px;
+	border-top: 1px solid var(--line);
+	font-size: 11px;
+	opacity: 0.6;
+}
+.btn-primary {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	margin-left: auto;
+	padding: 5px 14px;
+	border: 0;
+	border-radius: 999px;
+	background: var(--ink);
+	color: var(--canvas);
+	font-size: 12.5px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.btn-primary:hover {
+	opacity: 0.88;
+}

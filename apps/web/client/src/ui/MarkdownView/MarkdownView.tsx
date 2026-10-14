@@ -1,0 +1,39 @@
+import type { ComponentPropsWithRef, MouseEvent } from "react";
+import { cx } from "../../lib/format";
+import styles from "./MarkdownView.module.css";
+
+export interface MarkdownViewProps extends Omit<ComponentPropsWithRef<"div">, "children" | "dangerouslySetInnerHTML"> {
+	/** HTML from lib/markdown `renderMarkdown` (already escaped). */
+	readonly html: string;
+	/** A `.copy-code` button inside a `.code-block` was clicked; receives that block's code text. */
+	readonly onCopyCode?: (code: string) => void;
+}
+
+/**
+ * Renders Markdown HTML and handles the code blocks' copy buttons by event
+ * delegation (legacy `wireCopyActions`). Give it the legacy wrapper classes,
+ * e.g. `className="message-body"` or `"preview-markdown message-body"`.
+ * The HTML is trusted only because renderMarkdown escapes all source text
+ * before adding its own tags; never pass HTML from another source.
+ */
+export function MarkdownView({ html, onCopyCode, className, onClick, ...rest }: MarkdownViewProps) {
+	const handleClick = (event: MouseEvent<HTMLDivElement>) => {
+		onClick?.(event);
+		const target = event.target;
+		if (!onCopyCode || !(target instanceof Element)) return;
+		const button = target.closest(".copy-code");
+		if (!button || !event.currentTarget.contains(button)) return;
+		onCopyCode(button.closest(".code-block")?.querySelector("code")?.textContent ?? "");
+	};
+	return (
+		// biome-ignore lint/a11y/noStaticElementInteractions: delegates clicks of the copy buttons inside the rendered HTML.
+		// biome-ignore lint/a11y/useKeyWithClickEvents: the delegated targets are buttons, which raise click from the keyboard.
+		<div
+			className={cx(styles.root, className)}
+			onClick={handleClick}
+			// biome-ignore lint/security/noDangerouslySetInnerHtml: renderMarkdown output (legacy innerHTML contract); all source text is escaped first.
+			dangerouslySetInnerHTML={{ __html: html }}
+			{...rest}
+		/>
+	);
+}

@@ -641,6 +641,7 @@ export class WebSession {
 			sessionFile: manager.getSessionFile(),
 			archived: this.archived,
 			entries: manager.getBranch().map(projectEntry),
+			pendingApprovals: this.broker.pendingRequests(),
 			model: this.session.model ? { provider: this.session.model.provider, id: this.session.model.id } : undefined,
 			permissionPreset: (this.session.settingsManager as StepSettingsManager).getStepPermissionPreset() ?? "ask",
 			// Labelled straight from the kernel so the UI never invents its own copy.

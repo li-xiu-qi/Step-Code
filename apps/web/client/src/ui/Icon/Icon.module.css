@@ -1,0 +1,8 @@
+/*
+ * Sizes come from the legacy `.icon--<size>` classes in styles/global.css,
+ * which feature CSS also targets (e.g. `.file-twisty .icon`), so Icon always
+ * emits those class names. This module only adds what is not sized.
+ */
+.root {
+	flex: none;
+}

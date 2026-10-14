@@ -1,0 +1,7 @@
+/* Legacy styles.css 438 (`.empty-list`). */
+.root {
+	padding: 8px 12px 14px;
+	color: var(--ink-3);
+	font-size: 12px;
+	line-height: 1.6;
+}

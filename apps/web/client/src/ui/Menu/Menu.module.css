@@ -1,0 +1,45 @@
+/* Mirrors the legacy `.context-menu` / `.user-menu-item` look (styles.css 628-648, 1265-1277). */
+.menu {
+	min-width: 156px;
+	padding: 6px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-menu);
+	background: var(--surface);
+	box-shadow: 0 10px 30px var(--shadow);
+}
+
+.item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
+	min-height: var(--control-h-md);
+	padding: 0 9px;
+	border: 0;
+	border-radius: var(--radius-input);
+	background: none;
+	color: inherit;
+	font-size: 12px;
+	text-align: left;
+	text-decoration: none;
+	cursor: pointer;
+}
+
+.item:hover {
+	background: var(--hover);
+}
+
+.danger {
+	color: var(--danger);
+}
+
+.trailing {
+	margin-left: auto;
+	color: var(--ink-3);
+}
+
+.divider {
+	height: 1px;
+	margin: 5px 3px;
+	background: var(--line);
+}

@@ -1,0 +1,15 @@
+/* Shared shape of the legacy search fields (styles.css 818-830, 1101-1116). */
+.root {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--ink-3);
+}
+
+.input {
+	width: 100%;
+	min-width: 0;
+	border: 0;
+	outline: 0;
+	background: transparent;
+}

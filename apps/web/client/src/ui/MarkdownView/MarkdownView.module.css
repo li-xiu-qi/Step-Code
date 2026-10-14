@@ -1,0 +1,6 @@
+/*
+ * Markdown typography lives in styles/global.css (`.message-body`, `.code-block`), shared with legacy markup.
+ * The root adds nothing of its own, so the legacy wrapper classes fully decide the box.
+ */
+.root {
+}

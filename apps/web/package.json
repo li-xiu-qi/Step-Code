@@ -1,15 +1,30 @@
 {
-  "name": "@step-harness/web",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "dev": "tsx --tsconfig ../../tsconfig.json src/server.ts",
-    "build": "shx rm -rf dist && tsgo -p tsconfig.json && shx mkdir -p dist/public && shx cp public/* dist/public/ && shx cp openapi.yaml dist/openapi.yaml",
-    "test": "node --import tsx --test test/*.test.ts",
-    "test:e2e": "node --test test/e2e/*.e2e.mjs",
-    "typecheck": "tsgo -p tsconfig.json --noEmit"
-  },
-  "dependencies": {
-    "@step-harness/coding-agent": "workspace:*"
-  }
+	"name": "@step-harness/web",
+	"private": true,
+	"type": "module",
+	"exports": {
+		"./package.json": "./package.json",
+		"./server": "./dist/server.js",
+		"./desktop-bridge": "./client/src/platform/desktop-bridge.ts"
+	},
+	"scripts": {
+		"dev": "tsx --tsconfig ../../tsconfig.json src/server.ts",
+		"dev:client": "vite",
+		"build": "shx rm -rf dist && tsgo -p tsconfig.json && vite build && shx cp openapi.yaml dist/openapi.yaml",
+		"build:client": "vite build",
+		"test": "node --import tsx --test test/*.test.ts",
+		"test:e2e": "vite build && node --test test/e2e/*.e2e.mjs",
+		"typecheck": "tsgo -p tsconfig.json --noEmit && tsgo -p tsconfig.client.json --noEmit"
+	},
+	"dependencies": {
+		"@step-harness/coding-agent": "workspace:*",
+		"react": "19.3.0",
+		"react-dom": "19.3.0"
+	},
+	"devDependencies": {
+		"@types/react": "19.3.0",
+		"@types/react-dom": "19.3.0",
+		"@vitejs/plugin-react": "6.1.2",
+		"vite": "8.2.2"
+	}
 }

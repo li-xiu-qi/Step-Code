@@ -1,0 +1,349 @@
+/* Legacy styles.css 466-513: file tree. */
+.file-tree {
+	position: absolute;
+	inset: 64px 0 0;
+	z-index: 8;
+	display: none;
+	flex-direction: column;
+	background: var(--sidebar);
+}
+.file-tree.open {
+	display: flex;
+}
+.file-tree-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 8px 10px;
+}
+.file-tree-header strong {
+	overflow: hidden;
+	font-size: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.file-search {
+	padding: 0 10px 9px;
+}
+.file-search input {
+	width: 100%;
+	height: var(--control-h-md);
+	padding: 0 11px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-row);
+	outline: none;
+	background: var(--surface);
+	font-size: 13px;
+}
+.file-search input:focus {
+	border-color: var(--focus-border);
+}
+.file-tree-body {
+	flex: 1;
+	overflow: auto;
+	padding: 2px 7px 12px;
+}
+.file-row {
+	display: flex;
+	align-items: center;
+	gap: 7px;
+	min-height: 29px;
+	padding: 3px 8px;
+	border-radius: var(--radius-chip);
+	color: var(--ink-2);
+	font-size: 12px;
+	white-space: nowrap;
+}
+.file-row:hover {
+	background: var(--hover);
+}
+.file-row.directory {
+	color: var(--ink);
+}
+.file-row {
+	cursor: pointer;
+	user-select: none;
+}
+.file-row:focus-visible {
+	outline-offset: -2px;
+}
+.file-row.active {
+	background: var(--selected);
+	color: var(--ink);
+}
+.file-tree-header #fileTreeRefresh {
+	margin-left: auto;
+}
+/* Fixed-width slot so file names line up with folder names beside them. */
+.file-twisty {
+	display: inline-grid;
+	flex: none;
+	width: 12px;
+	place-items: center;
+	color: var(--ink-3);
+}
+.file-twisty .icon {
+	transition: transform var(--fast);
+}
+.file-row.expanded > .file-twisty .icon {
+	transform: rotate(90deg);
+}
+.file-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.file-detail {
+	min-width: 0;
+	margin-left: auto;
+	overflow: hidden;
+	color: var(--ink-3);
+	font-size: 11px;
+	text-overflow: ellipsis;
+}
+.file-note {
+	padding-top: 4px;
+	padding-bottom: 4px;
+}
+
+/*
+ * File preview. Closed by default and opened by picking a file, so the shell
+ * stays two-column; while open it takes its width from the main column rather
+ * than adding a grid track.
+ */
+.preview-panel {
+	position: absolute;
+	top: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 20;
+	display: flex;
+	flex-direction: column;
+	width: var(--preview-width, 560px);
+	max-width: calc(100vw - 48px);
+	border-left: 1px solid var(--line);
+	background: var(--canvas);
+}
+.app.preview-open .main {
+	margin-right: var(--preview-width, 560px);
+}
+.preview-show {
+	position: absolute;
+	top: 14px;
+	right: 14px;
+	z-index: 5;
+}
+.preview-resizer {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: -5px;
+	z-index: 1;
+	width: 9px;
+	cursor: col-resize;
+	touch-action: none;
+}
+.preview-resizer:hover,
+.preview-resizer:focus-visible {
+	background: linear-gradient(
+		to right,
+		transparent 4px,
+		var(--line-strong) 4px,
+		var(--line-strong) 5px,
+		transparent 5px
+	);
+	outline: none;
+}
+.preview-tabs-row {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	height: 46px;
+	padding: 0 8px;
+	border-bottom: 1px solid var(--line);
+}
+.preview-tabs {
+	display: flex;
+	flex: 1;
+	gap: 4px;
+	min-width: 0;
+	overflow-x: auto;
+	scrollbar-width: none;
+}
+.preview-tabs::-webkit-scrollbar {
+	display: none;
+}
+.preview-tab {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 6px;
+	max-width: 200px;
+	height: var(--control-h-sm);
+	padding: 0 4px 0 9px;
+	border-radius: var(--radius-control);
+	color: var(--ink-2);
+	font-size: 12px;
+	cursor: pointer;
+	white-space: nowrap;
+}
+.preview-tab > span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.preview-tab:hover {
+	background: var(--hover);
+}
+.preview-tab.active {
+	background: var(--selected);
+	color: var(--ink);
+}
+.preview-tab-close {
+	display: inline-grid;
+	width: 20px;
+	height: 20px;
+	place-items: center;
+	border-radius: var(--radius-tiny);
+	color: var(--ink-3);
+}
+.preview-tab-close:hover {
+	background: var(--line);
+	color: var(--ink);
+}
+.preview-toolbar {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 8px;
+	min-height: 40px;
+	padding: 0 8px 0 14px;
+	border-bottom: 1px solid var(--line);
+}
+.preview-path {
+	display: flex;
+	flex: 1;
+	align-items: baseline;
+	min-width: 0;
+	color: var(--ink-3);
+	font-size: 12px;
+	white-space: nowrap;
+}
+/* Truncate the directory from the left so the file name is always readable. */
+.preview-path > span {
+	min-width: 0;
+	overflow: hidden;
+	direction: rtl;
+	text-align: left;
+	text-overflow: ellipsis;
+}
+.preview-path > strong {
+	flex: none;
+	color: var(--ink);
+	font-weight: 600;
+}
+.preview-path > small {
+	flex: none;
+	margin-left: 8px;
+	font-size: 11px;
+}
+.preview-tools {
+	display: flex;
+	flex: none;
+	gap: 2px;
+}
+.preview-tools .icon-button[aria-pressed="true"] {
+	background: var(--hover);
+	color: var(--ink);
+}
+.preview-body {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+}
+.preview-message {
+	padding: 28px 18px;
+	color: var(--ink-3);
+	font-size: 13px;
+	text-align: center;
+}
+.preview-image {
+	display: block;
+	max-width: calc(100% - 32px);
+	margin: 16px auto;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-chip);
+}
+/*
+ * Legacy styles.css 579 also declared `max-width: none` here, but the later
+ * `.message-body` rule (705, same specificity) overrode it, so the rendered
+ * preview has always been capped at 70ch. With feature CSS now loading after
+ * global.css the declaration would start winning, so it is left out to keep
+ * the shipped look.
+ */
+.preview-markdown {
+	padding: 16px 20px 28px;
+}
+.code-view {
+	min-width: max-content;
+	padding: 10px 0 24px;
+	counter-reset: line;
+	font: 12px / 1.7 var(--mono);
+	tab-size: 4;
+}
+.code-view.wrap {
+	min-width: 0;
+}
+.code-line {
+	position: relative;
+	min-height: 1.7em;
+	padding: 0 16px 0 calc(var(--line-digits, 3) * 1ch + 30px);
+	white-space: pre;
+}
+.code-view.wrap .code-line {
+	overflow-wrap: anywhere;
+	white-space: pre-wrap;
+}
+/* Numbers come from a counter so selecting and copying code skips them. */
+.code-line::before {
+	position: absolute;
+	left: 0;
+	width: calc(var(--line-digits, 3) * 1ch + 14px);
+	color: var(--ink-3);
+	content: counter(line);
+	counter-increment: line;
+	text-align: right;
+	user-select: none;
+}
+.tok-comment {
+	color: var(--tok-comment);
+	font-style: italic;
+}
+.tok-string {
+	color: var(--tok-string);
+}
+.tok-number {
+	color: var(--tok-number);
+}
+.tok-keyword {
+	color: var(--tok-keyword);
+}
+.tok-key {
+	color: var(--tok-key);
+}
+.tok-tag {
+	color: var(--tok-tag);
+}
+
+/* Legacy styles.css 1420-1424. */
+/* Too narrow to share: the preview covers the conversation instead. */
+@media (max-width: 1000px) {
+	.app.preview-open .main {
+		margin-right: 0;
+	}
+	.preview-panel {
+		width: min(100vw, var(--preview-width, 560px));
+		max-width: 100vw;
+		box-shadow: -8px 0 24px var(--shadow);
+	}
+}

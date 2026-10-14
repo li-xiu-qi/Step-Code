@@ -1,0 +1,228 @@
+/* Project groups, session rows, tags and the grouped view: legacy styles.css 331-437, 439-464. */
+.project-group {
+	margin-bottom: 6px;
+}
+.project-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-height: 38px;
+	padding: 0 8px;
+	border-radius: var(--radius-row);
+	color: var(--ink-2);
+	cursor: pointer;
+}
+.project-header:hover {
+	background: var(--hover);
+}
+.project-header .project-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.project-actions {
+	display: flex;
+	margin-left: auto;
+	opacity: 0;
+}
+.project-header:hover .project-actions {
+	opacity: 1;
+}
+.project-action {
+	width: var(--control-h);
+	height: var(--control-h);
+}
+.project-sessions {
+	display: grid;
+	grid-template-rows: 1fr;
+	transition: grid-template-rows 0.16s ease;
+}
+.project-sessions > div {
+	min-height: 0;
+	overflow: hidden;
+}
+.project-group.folded .project-sessions {
+	grid-template-rows: 0fr;
+}
+.project-label {
+	padding: 10px 10px 5px;
+	color: var(--ink-3);
+	font-size: 12px;
+	font-weight: 600;
+}
+.recent-group:empty {
+	display: none;
+}
+
+.session-row {
+	position: relative;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
+	align-items: center;
+	gap: 7px;
+	width: 100%;
+	min-height: var(--control-h-lg);
+	padding: 6px 8px 6px 30px;
+	border-radius: var(--radius-row);
+	cursor: pointer;
+	transition: background-color var(--fast);
+}
+.session-row:hover {
+	background: var(--hover);
+}
+.session-row.active {
+	background: var(--selected);
+}
+.session-title {
+	overflow: hidden;
+	font-size: 13px;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.session-title-wrap {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.tag-diamond {
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border: 1.5px solid var(--tag-color, var(--line-strong));
+	border-radius: var(--radius-hairline);
+	transform: rotate(45deg);
+}
+.filter-chip .tag-diamond,
+.group-heading .tag-diamond {
+	background: var(--tag-color, transparent);
+}
+.session-tag-button {
+	display: none;
+	place-items: center;
+	width: 22px;
+	height: var(--control-h-xs);
+	border-radius: var(--radius-chip);
+	color: var(--ink-3);
+}
+.session-row:hover .session-tag-button {
+	display: grid;
+}
+.session-tag-button:hover {
+	background: var(--selected);
+	color: var(--ink);
+}
+.session-meta {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--ink-3);
+	font-size: 11px;
+}
+.session-badge {
+	display: inline-flex;
+	align-items: center;
+	min-height: 20px;
+	padding: 0 6px;
+	border-radius: var(--radius-pill);
+	background: var(--badge-surface);
+	color: var(--ink-2);
+	font-size: 10px;
+}
+.session-badge.failed {
+	background: var(--danger-surface);
+	color: var(--danger);
+}
+.session-badge.waiting {
+	background: var(--attention-surface);
+	color: var(--attention-ink);
+}
+.session-badge.running {
+	background: var(--badge-surface);
+	color: var(--ink);
+}
+.session-dot {
+	position: absolute;
+	left: 12px;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: transparent;
+}
+.session-row.running .session-dot {
+	background: var(--ink);
+	animation: pulse 1.4s ease-in-out infinite;
+}
+.session-row.waiting .session-dot {
+	background: var(--attention);
+}
+.session-row.failed .session-dot {
+	background: var(--danger);
+}
+.session-row.unread .session-dot {
+	background: var(--success);
+}
+.session-menu-button {
+	display: none;
+	width: 22px;
+	height: var(--control-h-xs);
+	border-radius: var(--radius-chip);
+	color: var(--ink-3);
+}
+.session-row:hover .session-menu-button {
+	display: inline-grid;
+	place-items: center;
+}
+.session-row:hover .session-time {
+	display: none;
+}
+.session-meta > .session-tag {
+	display: block;
+	margin-left: auto;
+}
+.grouped-view {
+	position: relative;
+}
+.group-section {
+	position: relative;
+	margin-bottom: 6px;
+	padding-left: 10px;
+}
+.group-spine {
+	position: absolute;
+	left: 4px;
+	top: 39px;
+	bottom: 5px;
+	width: 2px;
+	border-radius: var(--radius-spine);
+	background: var(--group-color, var(--line));
+}
+.group-heading {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-height: 38px;
+	padding: 0 9px;
+	border-radius: var(--radius-control);
+	font-weight: 600;
+	cursor: pointer;
+}
+.group-heading:hover {
+	background: var(--hover);
+}
+.group-section.folded .group-spine,
+.group-section.folded .group-sessions {
+	display: none;
+}
+.grouped-view .session-row {
+	padding-right: 28px;
+}
+.grouped-view .session-row .session-dot {
+	right: 10px;
+	left: auto;
+}
+.grouped-view .session-tag-button,
+.grouped-view .tag-diamond {
+	display: none;
+}

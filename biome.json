@@ -26,6 +26,9 @@
 	"files": {
 		"includes": [
 			"apps/*/src/**/*.ts",
+			"apps/*/client/**/*.ts",
+			"apps/*/client/**/*.tsx",
+			"apps/*/vite.config.ts",
 			"packages/*/src/**/*.ts",
 			"packages/*/test/**/*.ts",
 			"packages/coding-agent/examples/**/*.ts",

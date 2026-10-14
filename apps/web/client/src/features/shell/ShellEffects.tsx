@@ -1,0 +1,74 @@
+/**
+ * Document-level listeners owned by the shell: the global keyboard shortcuts
+ * and the central Escape chain (legacy app.js 3599-3644), and the OS theme
+ * listener (3647-3649). Renders nothing.
+ */
+
+import { useEffect } from "react";
+import { activeCwd, interruptCurrent } from "../../state/session";
+import { getState, setUi } from "../../state/store";
+import { openTree, setPreviewOpen } from "../files/actions";
+import { closeSearch, openSearch } from "../sidebar/actions";
+import { chooseWorkspaceFolder } from "../workspace/actions";
+import { closePreferenceSubmenus, toggleSidebar, toggleUserMenu, watchSystemTheme } from "./actions";
+
+/**
+ * Escape closes the topmost overlay, first match only, and otherwise stops the
+ * running turn (legacy 3631-3643). Overlays in this chain do not close
+ * themselves on Escape. State is read at key time, so an overlay that an
+ * earlier (React) handler just closed is skipped, exactly as the legacy chain
+ * saw it already hidden.
+ */
+function handleEscape(): void {
+	const { ui } = getState();
+	if (ui.searchOpen) closeSearch();
+	else if (ui.workspaceBrowserOpen) setUi({ workspaceBrowserOpen: false });
+	else if (ui.workspacePopoverOpen) setUi({ workspacePopoverOpen: false });
+	else if (ui.tagPicker) setUi({ tagPicker: null });
+	else if (ui.sessionMenu) setUi({ sessionMenu: null });
+	else if (ui.preferenceSubmenu) closePreferenceSubmenus();
+	else if (ui.userMenuOpen) toggleUserMenu(false);
+	else if (ui.fileTreeOpen) setUi({ fileTreeOpen: false });
+	else if (ui.midView) setUi({ midView: null });
+	else void interruptCurrent();
+}
+
+function handleKeydown(event: KeyboardEvent): void {
+	const mod = event.metaKey || event.ctrlKey;
+	// Autofill and some IMEs dispatch keydown without a `key`.
+	const key = typeof event.key === "string" ? event.key.toLowerCase() : "";
+	// With Alt held, macOS reports the composed character in `key`, so the
+	// Alt chords match on the physical key instead.
+	if (mod && event.altKey && event.code === "KeyO") {
+		event.preventDefault();
+		void chooseWorkspaceFolder();
+		return;
+	}
+	if (mod && event.altKey && event.code === "KeyP") {
+		event.preventDefault();
+		const cwd = activeCwd();
+		if (cwd) void openTree({ cwd });
+		return;
+	}
+	if (mod && key === "b") {
+		event.preventDefault();
+		if (event.shiftKey) {
+			const { preview } = getState();
+			if (preview.tabs.length) setPreviewOpen(!preview.open);
+		} else toggleSidebar();
+	}
+	if (mod && key === "k") {
+		event.preventDefault();
+		openSearch();
+	}
+	if (event.key === "Escape") handleEscape();
+}
+
+export function ShellEffects() {
+	useEffect(() => {
+		document.addEventListener("keydown", handleKeydown);
+		return () => document.removeEventListener("keydown", handleKeydown);
+	}, []);
+	useEffect(() => watchSystemTheme(), []);
+	return null;
+}

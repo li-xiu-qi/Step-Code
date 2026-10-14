@@ -1,0 +1,18 @@
+/* Shared shape of the legacy overlays (styles.css 917-936, 1073-1093, 1146-1166). */
+.overlay {
+	position: fixed;
+	inset: 0;
+	z-index: 95;
+	display: grid;
+	place-items: center;
+	padding: 16px;
+	background: rgb(0 0 0 / 28%);
+	backdrop-filter: blur(5px);
+}
+
+.dialog {
+	border: 1px solid var(--line);
+	border-radius: var(--radius-card);
+	background: var(--surface);
+	box-shadow: 0 24px 64px var(--shadow);
+}

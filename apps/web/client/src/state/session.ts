@@ -1,0 +1,561 @@
+/**
+ * Session lifecycle, ported from legacy app.js. Feature code calls these as
+ * plain functions; they update the store, and components re-render from it.
+ *
+ * Legacy `render*` calls that followed a state change (renderTimeline,
+ * renderSessionLists, renderPreferenceControls, populateModels, the
+ * `#stopRun` / `#prompt` / `#sendButton` toggles) are gone: those views are
+ * derived from the store now. Legacy line numbers are noted per function.
+ */
+
+import { t } from "../i18n";
+import { api, apiSend, errorMessage, setUnauthorizedHandler } from "../lib/api";
+import { writeClipboard } from "../lib/clipboard";
+import { basename, clipDetail, compact, toolInputDetail, toolInputSummary } from "../lib/format";
+import { contentText } from "../lib/markdown";
+import { type AppState, getState, mapWith, setState, setUi } from "./store";
+import type {
+	ApprovalRequest,
+	BootstrapPayload,
+	ContentPart,
+	SessionEntry,
+	SessionSnapshot,
+	SessionStatus,
+	SessionSummary,
+	TimelineItem,
+	WebWorkspace,
+} from "./types";
+
+/* ── Errors and banners ──────────────────────────────────────────────────── */
+
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+let toastSeq = 0;
+
+/** Show the bottom-right toast for 4.2s (legacy `showError`, 3184-3193). `danger=false` is the neutral tone. */
+export function showError(message: string, danger = true): void {
+	toastSeq += 1;
+	const seq = toastSeq;
+	setState({ toast: { message, tone: danger ? "danger" : "neutral", seq } });
+	if (toastTimer !== undefined) clearTimeout(toastTimer);
+	toastTimer = setTimeout(() => {
+		if (getState().toast?.seq === seq) setState({ toast: null });
+	}, 4200);
+}
+
+/**
+ * The launch token is single-use and the signing secret is per config root, so
+ * a stale cookie is a normal occurrence rather than a bug. Say so loudly:
+ * otherwise every subsequent call fails silently and the UI just looks empty.
+ * (legacy `showAuthBanner`, 689-692)
+ */
+export function showAuthBanner(): void {
+	setUi({ authExpired: true });
+}
+
+setUnauthorizedHandler(showAuthBanner);
+
+/** Copy to the clipboard and report the outcome in the toast (legacy `copyText`, 2098-2105). */
+export async function copyText(value: string, successText: string = t("copied")): Promise<void> {
+	try {
+		await writeClipboard(value);
+		showError(successText, false);
+	} catch {
+		showError(t("browserCopyDenied"));
+	}
+}
+
+/* ── Selectors shared by several features ────────────────────────────────── */
+
+/** Display title of a session (legacy `sessionTitle`, 719-725). */
+export function sessionTitle(session: Partial<SessionSummary> | null | undefined): string {
+	return (
+		session?.name ||
+		session?.firstMessage ||
+		(session?.id ? `Session ${session.id.slice(0, 8)}` : t("newConversation"))
+	);
+}
+
+/** Effective status of a session row (legacy `taskStatus`, 731-737). */
+export function taskStatus(state: AppState, session: SessionSummary): SessionStatus {
+	if (state.current?.id === session.id) return state.current.status ?? "idle";
+	return state.statusById.get(session.id) ?? ((session.messageCount ?? 0) > 0 ? "completed" : "idle");
+}
+
+/** Every folder the UI knows as a workspace, sorted by name (legacy `knownWorkspaces`, 1082-1095). */
+export function knownWorkspaces(state: AppState): string[] {
+	const values = new Set<string>();
+	if (state.bootstrapCwd) values.add(state.bootstrapCwd);
+	if (state.draftCwd) values.add(state.draftCwd);
+	if (state.current?.cwd) values.add(state.current.cwd);
+	for (const workspace of state.workspaces) if (workspace.available) values.add(workspace.path);
+	for (const session of state.sessions) {
+		if (session.cwd && session.cwdAvailable !== false) values.add(session.cwd);
+	}
+	return [...values].sort((left, right) => basename(left).localeCompare(basename(right), "zh-CN"));
+}
+
+/** The cwd new work should target: current session, else draft, else launch folder. */
+export function activeCwd(state: AppState = getState()): string {
+	return state.current?.cwd || state.draftCwd || state.bootstrapCwd;
+}
+
+/** `${provider}\u0000${id}` key of a model (legacy `modelKey`). */
+export function modelKey(model: { readonly provider: string; readonly id: string }): string {
+	return `${model.provider}\u0000${model.id}`;
+}
+
+/* ── Snapshots and timeline ──────────────────────────────────────────────── */
+
+/** Upsert a snapshot into the session list (legacy `mergeSessionSummary`, 2345-2352). */
+export function mergeSessionSummary(
+	sessions: readonly SessionSummary[],
+	snapshot: SessionSummary,
+): readonly SessionSummary[] {
+	const index = sessions.findIndex((session) => session.id === snapshot.id);
+	if (index < 0) return [snapshot, ...sessions];
+	const next = [...sessions];
+	next[index] = { ...sessions[index], ...snapshot };
+	return next;
+}
+
+/** Project session entries into timeline rows (legacy `timelineFromEntries`, 2055-2096). */
+export function timelineFromEntries(entries: readonly SessionEntry[] = []): TimelineItem[] {
+	const items: TimelineItem[] = [];
+	const toolResults = new Map<string, NonNullable<SessionEntry["message"]>>();
+	for (const entry of entries) {
+		if (entry.type === "message" && entry.message?.role === "toolResult" && entry.message.toolCallId) {
+			toolResults.set(entry.message.toolCallId, entry.message);
+		}
+	}
+	for (const entry of entries) {
+		if (entry.type !== "message" || !entry.message) continue;
+		const message = entry.message;
+		if (message.role === "toolResult") continue;
+		const text = contentText(message.content);
+		if (text) {
+			items.push({
+				itemId: `message-${entry.id}`,
+				entryId: entry.id,
+				kind: "message",
+				role: message.role,
+				content: text,
+				usage: entry.usage,
+				timestamp: entry.timestamp,
+			});
+		}
+		if (message.role === "assistant" && Array.isArray(message.content)) {
+			for (const block of (message.content as readonly ContentPart[]).filter((part) => part?.type === "toolCall")) {
+				const result = toolResults.get(String(block.id));
+				items.push({
+					itemId: `tool-${block.id}`,
+					kind: "tool",
+					state: result?.isError ? "failed" : result ? "completed" : "pending",
+					toolName: String(block.name ?? ""),
+					inputSummary: toolInputSummary(block.arguments),
+					outputSummary: result ? compact(contentText(result.content)) : "",
+					inputDetail: toolInputDetail(block.arguments),
+					outputDetail: result ? clipDetail(contentText(result.content)) : "",
+				});
+			}
+		}
+	}
+	return items;
+}
+
+/**
+ * Approvals announced on the stream and not yet decided. A snapshot fetched
+ * just before the announcement does not list them yet; without this the
+ * refresh that follows `approval_required` wiped the card and left the session
+ * "waiting" with nothing to answer.
+ */
+const liveApprovals = new Map<string, ApprovalRequest>();
+
+/** Drop an approval once it is decided or its session is no longer waiting. */
+export function forgetApproval(id: string): void {
+	liveApprovals.delete(id);
+}
+
+/** Pending approvals from the snapshot plus any the stream announced since. */
+function approvalItems(snapshot: SessionSnapshot): TimelineItem[] {
+	const pending = new Map<string, ApprovalRequest>();
+	for (const approval of snapshot.pendingApprovals ?? []) pending.set(approval.id, approval);
+	for (const approval of liveApprovals.values()) {
+		if (approval.sessionId === snapshot.id && !pending.has(approval.id)) pending.set(approval.id, approval);
+	}
+	return [...pending.values()].map((approval) => ({ itemId: `approval-${approval.id}`, kind: "approval", approval }));
+}
+
+/**
+ * Make `snapshot` the current session (legacy `renderSnapshot`, 2992-3011).
+ * Everything the legacy function painted is derived from these fields.
+ */
+export function renderSnapshot(snapshot: SessionSnapshot): void {
+	setState((state) => ({
+		current: snapshot,
+		policiesCache: snapshot.policies ?? state.policiesCache,
+		draftCwd: snapshot.cwd,
+		draftPolicy: snapshot.permissionPreset || "ask",
+		draftModel: snapshot.model ? modelKey(snapshot.model) : "",
+		statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
+		unreadById: mapWith(state.unreadById, snapshot.id, false),
+		sessions: mergeSessionSummary(state.sessions, snapshot),
+		timelineItems: [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)],
+	}));
+}
+
+/* ── Live stream ─────────────────────────────────────────────────────────── */
+
+let stream: EventSource | null = null;
+
+/** Close the current session's event stream, if any. */
+export function closeStream(): void {
+	stream?.close();
+	stream = null;
+	liveApprovals.clear();
+}
+
+interface AgentStreamEvent {
+	readonly type: string;
+	readonly message?: { readonly content?: unknown };
+	readonly toolCallId?: string;
+	readonly toolName?: string;
+	readonly args?: unknown;
+	readonly partialResult?: { readonly content?: unknown };
+	readonly result?: { readonly content?: unknown };
+	readonly isError?: boolean;
+}
+
+function updateTimeline(update: (items: readonly TimelineItem[]) => readonly TimelineItem[]): void {
+	setState((state) => ({ timelineItems: update(state.timelineItems) }));
+}
+
+/** Replace the row with the same id in place, or append it. */
+function upsertItem(items: readonly TimelineItem[], item: TimelineItem): readonly TimelineItem[] {
+	const index = items.findIndex((candidate) => candidate.itemId === item.itemId);
+	if (index < 0) return [...items, item];
+	const next = [...items];
+	next[index] = item;
+	return next;
+}
+
+function updateToolItem(
+	toolCallId: string | undefined,
+	update: (item: TimelineItem & { kind: "tool" }) => TimelineItem,
+) {
+	updateTimeline((items) =>
+		items.map((item) => (item.kind === "tool" && item.itemId === `tool-${toolCallId}` ? update(item) : item)),
+	);
+}
+
+/**
+ * The turn being streamed: its text so far plus the tool calls whose
+ * arguments are still arriving. Showing the calls (and a thinking marker)
+ * live matters: a model writing a file streams the whole file as arguments,
+ * and with text alone the page sat still until the turn ended.
+ */
+function applyLiveMessage(content: unknown): void {
+	const text = contentText(content);
+	const parts = Array.isArray(content) ? (content as readonly ContentPart[]) : [];
+	const calls = parts.filter((part) => part?.type === "toolCall");
+	const thinking = !text && parts.some((part) => part?.type === "thinking");
+	updateTimeline((items) => {
+		let next = items;
+		if (text || calls.length === 0) {
+			next = upsertItem(next, {
+				itemId: "message-live",
+				kind: "message",
+				role: "assistant",
+				content: text,
+				thinking,
+			});
+		} else {
+			next = next.filter((item) => item.itemId !== "message-live");
+		}
+		for (const call of calls) {
+			const itemId = `tool-${call.id}`;
+			const existing = next.find((item) => item.itemId === itemId);
+			// Once execution started the row is owned by the tool_execution_* events.
+			if (existing?.kind === "tool" && existing.state !== "pending") continue;
+			next = upsertItem(next, {
+				itemId,
+				kind: "tool",
+				state: "pending",
+				toolName: String(call.name ?? ""),
+				inputSummary: toolInputSummary(call.arguments),
+				outputSummary: existing?.kind === "tool" ? existing.outputSummary : "",
+				inputDetail: toolInputDetail(call.arguments),
+				outputDetail: existing?.kind === "tool" ? existing.outputDetail : "",
+			});
+		}
+		return next;
+	});
+}
+
+/** message_update fires per token; render at most once per frame. */
+let pendingLiveContent: { readonly content: unknown } | null = null;
+let liveFrame = 0;
+
+function scheduleLiveMessage(content: unknown): void {
+	pendingLiveContent = { content };
+	if (liveFrame) return;
+	liveFrame = requestAnimationFrame(() => {
+		liveFrame = 0;
+		const pending = pendingLiveContent;
+		pendingLiveContent = null;
+		if (pending) applyLiveMessage(pending.content);
+	});
+}
+
+/** Apply a buffered message_update now, so later events land after it. */
+function flushLiveMessage(): void {
+	if (liveFrame) cancelAnimationFrame(liveFrame);
+	liveFrame = 0;
+	const pending = pendingLiveContent;
+	pendingLiveContent = null;
+	if (pending) applyLiveMessage(pending.content);
+}
+
+function handleAgentEvent(agentEvent: AgentStreamEvent): void {
+	if (agentEvent.type === "message_update") {
+		scheduleLiveMessage(agentEvent.message?.content);
+		return;
+	}
+	flushLiveMessage();
+	if (agentEvent.type === "tool_execution_start") {
+		updateTimeline((items) =>
+			upsertItem(items, {
+				itemId: `tool-${agentEvent.toolCallId}`,
+				kind: "tool",
+				state: "pending",
+				toolName: String(agentEvent.toolName ?? ""),
+				inputSummary: toolInputSummary(agentEvent.args),
+				outputSummary: "",
+				inputDetail: toolInputDetail(agentEvent.args),
+				outputDetail: "",
+			}),
+		);
+	}
+	if (agentEvent.type === "tool_execution_update") {
+		const output = contentText(agentEvent.partialResult?.content);
+		updateToolItem(agentEvent.toolCallId, (item) => ({
+			...item,
+			outputSummary: compact(output),
+			outputDetail: clipDetail(output),
+		}));
+	}
+	if (agentEvent.type === "tool_execution_end") {
+		const output = contentText(agentEvent.result?.content) || JSON.stringify(agentEvent.result ?? {});
+		updateToolItem(agentEvent.toolCallId, (item) => ({
+			...item,
+			state: agentEvent.isError ? "failed" : "completed",
+			outputSummary: compact(output),
+			outputDetail: clipDetail(output),
+		}));
+	}
+	if (
+		agentEvent.type === "message_end" ||
+		agentEvent.type === "entry_appended" ||
+		agentEvent.type === "session_info_changed" ||
+		agentEvent.type === "agent_settled"
+	) {
+		void refreshCurrent().catch(() => {});
+		void refreshSessions().catch(() => {});
+	}
+}
+
+/** Subscribe to a session's SSE stream, replacing any previous one (legacy `connectStream`, 3013-3109). */
+export function connectStream(id: string): void {
+	stream?.close();
+	const source = new EventSource(`/api/v1/sessions/${id}/events`);
+	stream = source;
+	source.addEventListener("snapshot", (event) => renderSnapshot(JSON.parse((event as MessageEvent).data)));
+	source.addEventListener("agent", (event) => {
+		handleAgentEvent(JSON.parse((event as MessageEvent).data).event as AgentStreamEvent);
+	});
+	source.addEventListener("status", (event) => {
+		const payload = JSON.parse((event as MessageEvent).data) as { status: SessionStatus; unread: boolean };
+		if (payload.status !== "waiting") liveApprovals.clear();
+		setState((state) => ({
+			statusById: mapWith(state.statusById, id, payload.status),
+			unreadById: mapWith(state.unreadById, id, payload.unread),
+			current:
+				state.current?.id === id
+					? { ...state.current, status: payload.status, unread: payload.unread }
+					: state.current,
+		}));
+	});
+	source.addEventListener("approval_required", (event) => {
+		const approval = JSON.parse((event as MessageEvent).data).approval as ApprovalRequest;
+		liveApprovals.set(approval.id, approval);
+		updateTimeline((items) =>
+			items.some((item) => item.itemId === `approval-${approval.id}`)
+				? items
+				: [...items, { itemId: `approval-${approval.id}`, kind: "approval", approval }],
+		);
+	});
+	source.addEventListener("web_error", (event) =>
+		showError(JSON.parse((event as MessageEvent).data).message || "运行错误"),
+	);
+	source.onerror = () => {
+		setTimeout(() => void refreshCurrent().catch(() => {}), 600);
+	};
+}
+
+/* ── Session list and current session ────────────────────────────────────── */
+
+/** Reload the session list (legacy `refreshSessions`, 3111-3115). */
+export async function refreshSessions(): Promise<void> {
+	const data = await api<{ sessions: SessionSummary[] }>("/api/v1/sessions");
+	setState({ sessions: data.sessions });
+}
+
+/** Reload the current session's snapshot (legacy `refreshCurrent`, 3117-3120). */
+export async function refreshCurrent(): Promise<void> {
+	const current = getState().current;
+	if (!current) return;
+	renderSnapshot(await api<SessionSnapshot>(`/api/v1/sessions/${current.id}`));
+}
+
+/** Reload the registered workspaces (legacy `refreshWorkspaces`, 1984-1987). */
+export async function refreshWorkspaces(): Promise<void> {
+	const data = await api<{ workspaces: WebWorkspace[] }>("/api/v1/workspaces");
+	setState({ workspaces: data.workspaces });
+}
+
+/** Open a session and follow its stream (legacy `openSession`, 3122-3130). */
+export async function openSession(id: string): Promise<void> {
+	setUi({ midView: null });
+	try {
+		const snapshot = await api<SessionSnapshot>(`/api/v1/sessions/${id}`);
+		renderSnapshot(snapshot);
+		connectStream(id);
+	} catch (error) {
+		showError(errorMessage(error));
+	}
+}
+
+/** Ask the composer to focus `#prompt`. */
+export function requestPromptFocus(): void {
+	setUi((ui) => ({ promptFocusRequest: ui.promptFocusRequest + 1 }));
+}
+
+/**
+ * Leave the current session and start an unsaved draft in `cwd` (legacy
+ * `startDraft`, 3132-3151). The session is created on the first send.
+ */
+export function startDraft(cwd: string = getState().bootstrapCwd): void {
+	closeStream();
+	setState((state) => {
+		const current = state.current;
+		return {
+			draftPolicy: current ? current.permissionPreset || state.draftPolicy : state.draftPolicy,
+			draftModel: current ? (current.model ? modelKey(current.model) : state.draftModel) : state.draftModel,
+			current: null,
+			timelineItems: [],
+			draftCwd: cwd || state.bootstrapCwd,
+		};
+	});
+	// A new conversation replaces whatever covers the pane (cron / plugin market).
+	setUi({ midView: null });
+	requestPromptFocus();
+}
+
+/**
+ * The current session, creating it from the draft (cwd, policy, model) when
+ * there is none yet (legacy `createSessionIfNeeded`, 3153-3182).
+ */
+export async function createSessionIfNeeded(): Promise<SessionSnapshot> {
+	const state = getState();
+	if (state.current) return state.current;
+	let snapshot = await apiSend<SessionSnapshot>("/api/v1/sessions", "POST", {
+		cwd: state.draftCwd || state.bootstrapCwd,
+	});
+	if (state.draftPolicy && snapshot.permissionPreset !== state.draftPolicy) {
+		snapshot = await apiSend<SessionSnapshot>(`/api/v1/sessions/${snapshot.id}/policy`, "PATCH", {
+			preset: state.draftPolicy,
+		});
+	}
+	if (state.draftModel) {
+		const [provider, modelId] = state.draftModel.split("\u0000");
+		if (provider && modelId && (snapshot.model?.provider !== provider || snapshot.model?.id !== modelId)) {
+			snapshot = await apiSend<SessionSnapshot>(`/api/v1/sessions/${snapshot.id}/model`, "PATCH", {
+				provider,
+				modelId,
+			});
+		}
+	}
+	renderSnapshot(snapshot);
+	connectStream(snapshot.id);
+	await refreshSessions();
+	return snapshot;
+}
+
+/** Stop the running turn of the current session (legacy `interruptCurrent`, 3245-3254). */
+export async function interruptCurrent(): Promise<void> {
+	const current = getState().current;
+	if (!current || current.status !== "running") return;
+	try {
+		await apiSend(`/api/v1/sessions/${current.id}/interrupt`, "POST");
+	} catch (error) {
+		showError(errorMessage(error));
+	}
+}
+
+/* ── Bootstrap (legacy IIFE, 3886-3919, and `exchange`, 694-707) ──────────── */
+
+/** Trade the one-time `#token=` from the launch link for the session cookie. */
+export async function exchange(): Promise<void> {
+	const token = new URLSearchParams(location.hash.slice(1)).get("token");
+	if (!token) return;
+	try {
+		await apiSend("/auth/exchange", "POST", { token });
+		history.replaceState(null, "", `${location.pathname}${location.search}`);
+	} catch (error) {
+		showAuthBanner();
+		throw error;
+	}
+}
+
+export interface BootstrapOptions {
+	/** Opens the file tree for `?tree=1` (features/files/actions.ts `openTree`). */
+	readonly openTree?: (project: { cwd: string }) => Promise<void>;
+}
+
+let bootstrapped = false;
+
+/**
+ * Sign in, load workspaces and sessions, then open the most relevant session
+ * (or start a draft in the launch folder). Runs once per page load; a second
+ * call (React StrictMode double effects) is ignored because the launch token
+ * cannot be exchanged twice.
+ */
+export async function bootstrap(options: BootstrapOptions = {}): Promise<void> {
+	if (bootstrapped) return;
+	bootstrapped = true;
+	try {
+		await exchange();
+		const boot = await api<BootstrapPayload>("/api/v1/bootstrap");
+		setState({
+			bootstrapCwd: boot.cwd,
+			directoryPicker: boot.directoryPicker === "native" ? "native" : "browse",
+			login: boot.login ?? null,
+			draftCwd: boot.cwd,
+		});
+		await refreshWorkspaces();
+		await refreshSessions();
+		const sessions = getState().sessions;
+		const first =
+			sessions.find((session) => !session.archived && session.cwdAvailable !== false && session.cwd === boot.cwd) ??
+			sessions.find((session) => !session.archived && session.cwdAvailable !== false);
+		if (first) await openSession(first.id);
+		else startDraft(boot.cwd);
+		if (location.search.includes("tree=1")) {
+			const project = getState().sessions.find(
+				(session) => !session.archived && session.cwd && session.cwdAvailable !== false,
+			);
+			if (project?.cwd && options.openTree) await options.openTree({ cwd: project.cwd });
+		}
+	} catch (error) {
+		showError(errorMessage(error));
+	}
+}

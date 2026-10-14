@@ -1,0 +1,107 @@
+/**
+ * Sidebar actions, callable from any feature. The sidebar feature owns this
+ * file; `openSearch` / `closeSearch` are the fixed cross-feature names.
+ */
+
+import type { TagColor } from "../../i18n";
+import { type ConversationView, setState, setToggled, setUi } from "../../state/store";
+
+/* ── Global search (legacy 1199-1211) ────────────────────────────────────── */
+
+const searchOpenListeners = new Set<() => void>();
+
+/**
+ * Called on every `openSearch()`, even when the modal is already open (⌘K
+ * again): the legacy function cleared `#globalSearchInput`, reset the
+ * selection and focused the input each time. The search modal subscribes.
+ */
+export function subscribeSearchOpen(listener: () => void): () => void {
+	searchOpenListeners.add(listener);
+	return () => {
+		searchOpenListeners.delete(listener);
+	};
+}
+
+/** Show the global search modal with an empty query (legacy `openSearch`, 1199-1205). */
+export function openSearch(): void {
+	setUi({ searchOpen: true });
+	for (const listener of [...searchOpenListeners]) listener();
+}
+
+/** Hide the global search modal (legacy `closeSearch`, 1207-1211); the modal drops its results. */
+export function closeSearch(): void {
+	setUi({ searchOpen: false });
+}
+
+/* ── Session context menu and tag picker ─────────────────────────────────── */
+
+/** Show `#sessionMenu` for a session at viewport coordinates (legacy `openSessionMenu`, 1291-1329). */
+export function openSessionMenu(sessionId: string, x: number, y: number): void {
+	setUi({ sessionMenu: { sessionId, x, y } });
+}
+
+/** Legacy `closeSessionMenu` (1287-1289). */
+export function closeSessionMenu(): void {
+	setUi({ sessionMenu: null });
+}
+
+/** Show `#tagPicker` for a session under the button that opened it (legacy `openTagPicker`, 1022-1060). */
+export function openTagPicker(sessionId: string, anchor: Element): void {
+	const rect = anchor.getBoundingClientRect();
+	setUi({ tagPicker: { sessionId, anchorRight: rect.right, anchorBottom: rect.bottom } });
+}
+
+export function closeTagPicker(): void {
+	setUi({ tagPicker: null });
+}
+
+/* ── Conversation list ───────────────────────────────────────────────────── */
+
+/**
+ * Switch between the project and grouped views; entering the grouped view
+ * drops the tag filter unless `clearFilter` is false (legacy
+ * `switchConversationView`, 914-927).
+ */
+export function switchConversationView(view: string, clearFilter = true): void {
+	const currentView: ConversationView = view === "group" ? "group" : "project";
+	setState((state) => ({
+		currentView,
+		currentFilter: clearFilter && currentView === "group" ? null : state.currentFilter,
+	}));
+}
+
+/** Filter the project view by a tag colour; null shows every row (legacy `applyTagFilter`, 929-955). */
+export function applyTagFilter(key: TagColor | null): void {
+	setState({ currentFilter: key || null });
+}
+
+/** Toggle between active and archived conversations (legacy `toggleArchived`, 1282-1285). */
+export function toggleArchived(): void {
+	setState((state) => ({ showArchived: !state.showArchived }));
+}
+
+/** Fold or unfold a project group (legacy project header click, 857-861). */
+export function toggleProjectFolded(cwd: string): void {
+	setState((state) => ({ foldedProjects: setToggled(state.foldedProjects, cwd) }));
+}
+
+/** Collapse or show the sidebar (legacy `#sidebarToggle`, 3383-3385). */
+export function toggleSidebar(): void {
+	setUi((ui) => ({ sidebarHidden: !ui.sidebarHidden }));
+}
+
+/** Tag a session with `color`, or untag it with null. Tags are client-only, as in the legacy code. */
+export function setSessionTag(sessionId: string, color: TagColor | null): void {
+	setState((state) => {
+		const tags = new Map(state.tags);
+		if (color) tags.set(sessionId, color);
+		else tags.delete(sessionId);
+		return { tags };
+	});
+}
+
+/** Create a group for an unused colour and tag `sessionId` with it (legacy `showTagNameInput` accept, 1066-1071). */
+export function createGroupAndTag(sessionId: string, color: TagColor, name: string): void {
+	setState((state) => ({ groups: [...state.groups, { key: color, name }] }));
+	setSessionTag(sessionId, color);
+}

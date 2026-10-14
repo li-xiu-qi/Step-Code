@@ -68,6 +68,11 @@ export class ApprovalBroker {
 		});
 	}
 
+	/** Requests still waiting for a verdict, oldest first, so a reloaded page can show them again. */
+	pendingRequests(): ApprovalRequest[] {
+		return [...this.pending.values()].map((pending) => pending.request);
+	}
+
 	decide(id: string, verdict: "approve" | "approve_for_session" | "deny"): boolean {
 		const pending = this.pending.get(id);
 		if (!pending) return false;

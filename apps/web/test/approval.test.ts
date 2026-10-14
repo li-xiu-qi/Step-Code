@@ -41,3 +41,20 @@ test("approval broker projects edit before/after preview from the captured tool 
 	assert.equal(broker.decide(event.approval.id, "deny"), true);
 	assert.equal(await approval, false);
 });
+
+test("approval broker lists undecided requests so a snapshot can show them again", async () => {
+	const events: unknown[] = [];
+	const broker = new ApprovalBroker("session-3", (event) => events.push(event));
+	const controller = new AbortController();
+	const first = broker.confirm("write", "first");
+	const second = broker.confirm("bash", "second", controller.signal);
+	assert.deepEqual(
+		broker.pendingRequests().map((request) => request.message),
+		["first", "second"],
+	);
+	broker.decide((events[0] as { approval: { id: string } }).approval.id, "approve");
+	controller.abort();
+	assert.equal(await first, true);
+	assert.equal(await second, false);
+	assert.deepEqual(broker.pendingRequests(), []);
+});

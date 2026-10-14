@@ -1,0 +1,23 @@
+/* Same motion as the legacy session-row running dot (`@keyframes pulse`, styles.css 166); module-local. */
+@keyframes pulse {
+	0%,
+	100% {
+		opacity: 0.28;
+		transform: scale(0.75);
+	}
+
+	50% {
+		opacity: 1;
+		transform: scale(1.1);
+	}
+}
+
+.root {
+	display: inline-block;
+	flex: none;
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--ink);
+	animation: pulse 1.4s ease-in-out infinite;
+}

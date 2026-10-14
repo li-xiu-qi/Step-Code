@@ -1,0 +1,84 @@
+import type { CSSProperties } from "react";
+import { Composer } from "./features/composer";
+import { ConversationStream, FeedbackModal, TaskBanner } from "./features/conversation";
+import { FileTreePanel, PreviewPanel, PreviewShowButton } from "./features/files";
+import { CronView, MarketView } from "./features/market";
+import { AuthBanner, ErrorToast, LoggedOutOverlay, ShellEffects, SidebarShowButton, UserArea } from "./features/shell";
+import { SearchModal, SessionMenu, SidebarNav, SidebarResizer, TagPicker } from "./features/sidebar";
+import { WorkspaceBrowserModal, WorkspaceControl } from "./features/workspace";
+import { I18nProvider } from "./i18n";
+import { cx } from "./lib/format";
+import { shallowEqual, useAppStore } from "./state/store";
+import { IconSprite } from "./ui";
+
+/**
+ * The legacy page skeleton (public/index.html), one slot per feature at its
+ * original DOM position:
+ *
+ *   svg.icon-sprite
+ *   div.app[.sidebar-hidden][.preview-open][.resizing]  (--sidebar-width, --preview-width)
+ *     aside.sidebar      sidebar nav | files tree | shell user area
+ *     #sidebarResizer    sidebar
+ *     main.main          shell show button | files show button | conversation banner | market cron/market views | stream
+ *                        | .composer-zone > composer form (+ workspace control) | sidebar session menu
+ *                        | shell toast + auth banner
+ *     aside#previewPanel files
+ *   #tagPicker, #feedbackModal, #searchModal, #workspaceBrowserModal, #loggedOutOverlay
+ */
+export function App() {
+	const layout = useAppStore(
+		(state) => ({
+			sidebarHidden: state.ui.sidebarHidden,
+			sidebarWidth: state.ui.sidebarWidth,
+			previewWidth: state.ui.previewWidth,
+			resizing: state.ui.resizing,
+			previewOpen: state.preview.open,
+		}),
+		shallowEqual,
+	);
+	const style: Record<string, string> = {};
+	if (layout.sidebarWidth !== null) style["--sidebar-width"] = `${layout.sidebarWidth}px`;
+	if (layout.previewWidth !== null) style["--preview-width"] = `${layout.previewWidth}px`;
+	return (
+		<I18nProvider>
+			<IconSprite />
+			<div
+				className={cx(
+					"app",
+					layout.sidebarHidden && "sidebar-hidden",
+					layout.previewOpen && "preview-open",
+					layout.resizing && "resizing",
+				)}
+				style={style as CSSProperties}
+			>
+				<aside className="sidebar">
+					<SidebarNav />
+					<FileTreePanel />
+					<UserArea />
+				</aside>
+				<SidebarResizer />
+				<main className="main">
+					<SidebarShowButton />
+					<PreviewShowButton />
+					<TaskBanner />
+					<CronView />
+					<MarketView />
+					<ConversationStream />
+					<div className="composer-zone">
+						<Composer workspaceControl={<WorkspaceControl />} />
+					</div>
+					<SessionMenu />
+					<ErrorToast />
+					<AuthBanner />
+				</main>
+				<PreviewPanel />
+			</div>
+			<TagPicker />
+			<FeedbackModal />
+			<SearchModal />
+			<WorkspaceBrowserModal />
+			<LoggedOutOverlay />
+			<ShellEffects />
+		</I18nProvider>
+	);
+}

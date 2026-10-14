@@ -34,6 +34,28 @@ test("workspaces persist across registry instances and can be removed", async ()
 	}
 });
 
+test("the most recently added workspace is listed first", async () => {
+	const base = await realpath(await mkdtemp(join(tmpdir(), "stepcode-web-workspaces-")));
+	try {
+		const registry = new WorkspaceRegistry(join(base, "web-workspaces.json"));
+		for (const name of ["first", "second"]) await mkdir(join(base, name));
+		await registry.add(join(base, "first"));
+		await registry.add(join(base, "second"));
+		assert.deepEqual(
+			(await registry.list()).map((workspace) => workspace.name),
+			["second", "first"],
+		);
+		// Adding a listed folder again moves it back to the top.
+		await registry.add(join(base, "first"));
+		assert.deepEqual(
+			(await registry.list()).map((workspace) => workspace.name),
+			["first", "second"],
+		);
+	} finally {
+		await rm(base, { recursive: true, force: true });
+	}
+});
+
 test("only existing directories can be registered", async () => {
 	const base = await mkdtemp(join(tmpdir(), "stepcode-web-workspaces-"));
 	try {
