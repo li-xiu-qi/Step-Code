@@ -45,6 +45,7 @@ import {
 } from "@step-harness/coding-agent";
 import { ApprovalBroker, type ApprovalRequest } from "./approval.ts";
 import { type WebAttachment, withTextAttachments } from "./attachments.ts";
+import { ClarificationBroker, type ClarificationEvent } from "./clarification.ts";
 import { feedbackCategoryFor } from "./feedback.ts";
 import { claimWebSessionWriter } from "./writer-lease.ts";
 
@@ -95,6 +96,7 @@ async function refreshStepModelCatalog(modelRuntime: ModelRuntime): Promise<void
 }
 
 export type WebEvent =
+	| ClarificationEvent
 	| { type: "agent"; event: AgentSessionEvent }
 	| { type: "approval_required"; approval: ApprovalRequest }
 	| { type: "status"; status: WebSessionStatus; unread: boolean }
@@ -112,9 +114,10 @@ export type WebMode = "goal" | "plan" | "ultraloop";
  * not presented as a cross-process lock: older CLI builds do not participate
  * in a shared lease protocol and must be closed before Web takes ownership.
  */
-function webUiContext(broker: ApprovalBroker): ExtensionUIContext {
+function webUiContext(broker: ApprovalBroker, clarifications: ClarificationBroker): ExtensionUIContext {
 	const unsupported = async <T>(fallback: T): Promise<T> => fallback;
 	return {
+		clarify: (questions, signal) => clarifications.ask(questions, signal),
 		select: async (_title, options) => options[0],
 		confirm: (title, message, options) =>
 			broker.confirm(title.replace(/^Approve |^Dangerous /u, ""), message, options?.signal),
@@ -207,6 +210,7 @@ function projectEntry(entry: SessionEntry): Record<string, unknown> {
 
 export class WebSession {
 	readonly broker: ApprovalBroker;
+	readonly clarifications: ClarificationBroker;
 	private readonly listeners = new Set<(event: WebEvent) => void>();
 	private runtime!: AgentSessionRuntime;
 	private session!: AgentSession;
@@ -232,6 +236,19 @@ export class WebSession {
 		this.modelRuntime = modelRuntime;
 		this.sessionManager = sessionManager;
 		this.writerOwnerId = writerOwnerId;
+		this.clarifications = new ClarificationBroker(
+			() => this.id,
+			(event) => {
+				if (event.type === "clarification_required") this.setStatus("waiting", false);
+				this.emit(event);
+				if (
+					event.type === "clarification_resolved" &&
+					!this.clarifications.pendingRequests().length &&
+					!this.broker.pendingRequests().length
+				)
+					this.setStatus("running", false);
+			},
+		);
 		this.broker = new ApprovalBroker(id, (event) => {
 			if (event.type === "approval_required") this.setStatus("waiting", false);
 			this.emit(event);
@@ -384,6 +401,7 @@ export class WebSession {
 	}
 
 	private bindSession(session: AgentSession): void {
+		this.clarifications.clear();
 		// Keep the advertised id in step with the session actually bound, so a
 		// fork or /new does not leave the UI pointing at the previous session.
 		this.id = session.sessionManager.getSessionId();
@@ -419,7 +437,7 @@ export class WebSession {
 		});
 		void session.bindExtensions({
 			mode: "rpc",
-			uiContext: webUiContext(this.broker),
+			uiContext: webUiContext(this.broker, this.clarifications),
 			commandContextActions: {
 				waitForIdle: () => session.waitForIdle(),
 				newSession: (options) => this.runtime.newSession(options),
@@ -584,6 +602,7 @@ export class WebSession {
 	}
 
 	async interrupt(): Promise<void> {
+		this.clarifications.clear();
 		await this.session.abort();
 		this.setStatus("idle");
 	}
@@ -642,6 +661,7 @@ export class WebSession {
 			archived: this.archived,
 			entries: manager.getBranch().map(projectEntry),
 			pendingApprovals: this.broker.pendingRequests(),
+			pendingClarifications: this.clarifications.pendingRequests(),
 			model: this.session.model ? { provider: this.session.model.provider, id: this.session.model.id } : undefined,
 			permissionPreset: (this.session.settingsManager as StepSettingsManager).getStepPermissionPreset() ?? "ask",
 			// Labelled straight from the kernel so the UI never invents its own copy.
@@ -677,6 +697,7 @@ export class WebSession {
 	}
 
 	async close(): Promise<void> {
+		this.clarifications.clear();
 		this.broker.clear();
 		this.unsubscribeSession?.();
 		await this.runtime.dispose();

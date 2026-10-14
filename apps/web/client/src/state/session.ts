@@ -17,6 +17,7 @@ import { type AppState, getState, mapWith, setState, setUi } from "./store";
 import type {
 	ApprovalRequest,
 	BootstrapPayload,
+	ClarificationRequest,
 	ContentPart,
 	SessionEntry,
 	SessionSnapshot,
@@ -169,6 +170,8 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
  * "waiting" with nothing to answer.
  */
 const liveApprovals = new Map<string, ApprovalRequest>();
+const liveClarifications = new Map<string, ClarificationRequest>();
+const resolvedClarifications = new Set<string>();
 
 /** Drop an approval once it is decided or its session is no longer waiting. */
 export function forgetApproval(id: string): void {
@@ -190,6 +193,12 @@ function approvalItems(snapshot: SessionSnapshot): TimelineItem[] {
  * Everything the legacy function painted is derived from these fields.
  */
 export function renderSnapshot(snapshot: SessionSnapshot): void {
+	const pending = new Map((snapshot.pendingClarifications ?? []).map((request) => [request.id, request]));
+	for (const request of liveClarifications.values()) {
+		if (request.sessionId === snapshot.id) pending.set(request.id, request);
+	}
+	for (const id of resolvedClarifications) pending.delete(id);
+	snapshot = { ...snapshot, pendingClarifications: [...pending.values()] };
 	setState((state) => {
 		const timelineItems = [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)];
 		const pendingTurn =
@@ -223,6 +232,8 @@ export function closeStream(): void {
 	stream?.close();
 	stream = null;
 	liveApprovals.clear();
+	liveClarifications.clear();
+	resolvedClarifications.clear();
 }
 
 interface AgentStreamEvent {
@@ -388,7 +399,9 @@ export function connectStream(id: string): void {
 	stream?.close();
 	const source = new EventSource(`/api/v1/sessions/${id}/events`);
 	stream = source;
-	source.addEventListener("snapshot", (event) => renderSnapshot(JSON.parse((event as MessageEvent).data)));
+	source.addEventListener("snapshot", (event) => {
+		if (stream === source) renderSnapshot(JSON.parse((event as MessageEvent).data));
+	});
 	source.addEventListener("agent", (event) => {
 		handleAgentEvent(JSON.parse((event as MessageEvent).data).event as AgentStreamEvent);
 	});
@@ -415,6 +428,40 @@ export function connectStream(id: string): void {
 				: [...items, { itemId: `approval-${approval.id}`, kind: "approval", approval }],
 		);
 	});
+	source.addEventListener("clarification_required", (event) => {
+		const request = JSON.parse((event as MessageEvent).data).clarification as ClarificationRequest;
+		if (stream !== source || request.sessionId !== id) return;
+		liveClarifications.set(request.id, request);
+		setState((state) => ({
+			current:
+				state.current?.id === id
+					? {
+							...state.current,
+							pendingClarifications: [
+								...(state.current.pendingClarifications ?? []).filter((item) => item.id !== request.id),
+								request,
+							],
+						}
+					: state.current,
+		}));
+	});
+	source.addEventListener("clarification_resolved", (event) => {
+		if (stream !== source) return;
+		const requestId = JSON.parse((event as MessageEvent).data).id as string;
+		liveClarifications.delete(requestId);
+		resolvedClarifications.add(requestId);
+		setState((state) => ({
+			current:
+				state.current?.id === id
+					? {
+							...state.current,
+							pendingClarifications: (state.current.pendingClarifications ?? []).filter(
+								(item) => item.id !== requestId,
+							),
+						}
+					: state.current,
+		}));
+	});
 	source.addEventListener("web_error", (event) => {
 		setState({ pendingTurn: null });
 		showError(JSON.parse((event as MessageEvent).data).message || "运行错误");
@@ -436,7 +483,8 @@ export async function refreshSessions(): Promise<void> {
 export async function refreshCurrent(): Promise<void> {
 	const current = getState().current;
 	if (!current) return;
-	renderSnapshot(await api<SessionSnapshot>(`/api/v1/sessions/${current.id}`));
+	const snapshot = await api<SessionSnapshot>(`/api/v1/sessions/${current.id}`);
+	if (getState().current?.id === current.id) renderSnapshot(snapshot);
 }
 
 /** Reload the registered workspaces (legacy `refreshWorkspaces`, 1984-1987). */
@@ -518,7 +566,7 @@ export async function createSessionIfNeeded(): Promise<SessionSnapshot> {
 /** Stop the running turn of the current session (legacy `interruptCurrent`, 3245-3254). */
 export async function interruptCurrent(): Promise<void> {
 	const current = getState().current;
-	if (!current || current.status !== "running") return;
+	if (!current || (current.status !== "running" && current.status !== "waiting")) return;
 	try {
 		await apiSend(`/api/v1/sessions/${current.id}/interrupt`, "POST");
 	} catch (error) {

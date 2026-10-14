@@ -168,35 +168,107 @@
 	white-space: nowrap;
 }
 .approval {
-	padding: 14px;
-	border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line));
-	border-radius: var(--radius-overlay);
-	background: var(--danger-surface);
+	padding: 16px;
+	border: 1px solid color-mix(in srgb, var(--line) 65%, var(--surface));
+	border-radius: var(--radius-card);
+	background: var(--surface);
+	color: color-mix(in srgb, var(--ink) 95%, var(--surface));
 }
-.approval strong {
+.approval-heading {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+	min-height: 20px;
+	margin-bottom: 10px;
+	color: var(--ink-2);
 	font-size: 13px;
+	line-height: 20px;
 }
-.approval p {
-	margin-top: 5px;
+.approval-heading .icon {
+	width: 16px;
+	height: 16px;
+}
+.approval-outcome {
+	margin-left: auto;
+	font-size: 12px;
+}
+.approval-title {
+	display: block;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 22px;
+	overflow-wrap: anywhere;
+}
+.approval-reason {
+	margin-top: 8px;
 	color: var(--ink-2);
 	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+.approval-content {
+	display: -webkit-box;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+	margin-top: 20px;
+	padding: 0 4px;
+	overflow: hidden;
+	color: var(--ink-3);
+	font: 13px / 18px var(--mono);
 	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.approval-content.expanded {
+	display: block;
+	max-height: min(360px, 40vh);
+	overflow: auto;
+}
+.approval-expand-row {
+	display: flex;
+	justify-content: flex-end;
+	margin-top: 8px;
+}
+.approval-expand {
+	padding: 0 8px;
+	border-radius: var(--radius-chip);
+	color: var(--ink-3);
+	font-size: 13px;
+	line-height: 20px;
+}
+.approval-expand:hover {
+	background: var(--surface-soft);
+	color: var(--ink-2);
 }
 .approval-actions {
 	display: flex;
 	justify-content: flex-end;
-	gap: 7px;
-	margin-top: 12px;
+	gap: 8px;
+	margin-top: 16px;
 }
 .approval-actions button {
-	padding: 6px 10px;
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-control);
+	min-height: 28px;
+	padding: 3px 10px;
+	border: 1px solid color-mix(in srgb, var(--line) 65%, var(--surface));
+	border-radius: var(--radius-pill);
 	background: var(--surface);
-	font-size: 12px;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 20px;
+}
+.approval-actions button:hover {
+	background: var(--surface-soft);
+}
+.approval-actions button:disabled {
+	cursor: default;
+	opacity: 0.55;
 }
 .approval-actions .approve {
 	border-color: var(--ink);
 	background: var(--ink);
 	color: var(--surface);
+}
+.approval-actions .approve:hover {
+	background: var(--ink-2);
+}
+@media (max-width: 480px) {
+	.approval { padding: 14px 12px; }
 }

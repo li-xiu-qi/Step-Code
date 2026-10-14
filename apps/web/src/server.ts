@@ -384,6 +384,17 @@ const server = createServer(async (request, response) => {
 				await session.interrupt();
 				return json(response, 200, { ok: true });
 			}
+			if (parts[4] === "clarifications" && parts[5] === "response" && parts.length === 6 && method === "POST") {
+				const input = await body(request);
+				if (typeof input.id !== "string") return error(response, 400, "Clarification id is required");
+				try {
+					if (!session.clarifications.respond(input.id, input))
+						return error(response, 404, "Clarification not found");
+				} catch (caught) {
+					return error(response, 400, caught instanceof Error ? caught.message : String(caught));
+				}
+				return json(response, 200, { ok: true });
+			}
 			if (parts[4] === "approvals" && parts[5] === "decision" && method === "POST") {
 				const input = await body(request);
 				const verdict = input.verdict;

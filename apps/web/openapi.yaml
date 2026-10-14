@@ -157,7 +157,19 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
-        "200": { description: Session snapshot }
+        "200":
+          description: Session snapshot including pendingClarifications (in-memory requests restored after page reload)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingClarifications:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClarificationRequest" }
+                  pendingApprovals:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApprovalRequest" }
     delete:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
@@ -168,7 +180,7 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
-        "200": { description: SSE snapshot and agent/status/approval events }
+        "200": { description: "SSE snapshot and agent/status/approval/clarification_required/clarification_resolved events. Required carries clarification; resolved carries id." }
   /api/v1/sessions/{id}/messages:
     post:
       parameters:
@@ -212,6 +224,39 @@ paths:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
         "200": { description: Persisted Step permission preset }
+  /api/v1/sessions/{id}/clarifications/response:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, cancelled]
+              properties:
+                id: { type: string }
+                cancelled: { type: boolean }
+                answers:
+                  description: Required unless cancelled. One reply per question, in request order.
+                  type: array
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id: { type: string }
+                    oneOf:
+                      - properties: { optionIndex: { type: integer, minimum: 0 } }
+                        required: [optionIndex]
+                      - properties: { text: { type: string, minLength: 1 } }
+                        required: [text]
+                      - properties: { skipped: { const: true } }
+                        required: [skipped]
+      responses:
+        "200": { description: Response accepted; resumes the existing clarify_user call }
+        "400": { description: Invalid or incomplete answers; request remains pending }
+        "404": { description: Request no longer pending in this session }
   /api/v1/sessions/{id}/model:
     patch:
       parameters:
@@ -232,6 +277,52 @@ paths:
         "200": { description: Workspace file contents }
 components:
   schemas:
+    ApprovalRequest:
+      type: object
+      required: [id, sessionId, toolName, message, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        toolName: { type: string }
+        message: { type: string, description: Original confirmation diagnostics }
+        reason: { type: string, description: Specific policy reason without call and batch diagnostics }
+        createdAt: { type: number }
+        input:
+          type: object
+          additionalProperties: true
+          description: Full captured arguments for displaying the command without clipping
+        preview:
+          type: object
+          properties:
+            path: { type: string }
+            before: { type: string }
+            after: { type: string }
+    ClarificationRequest:
+      type: object
+      required: [id, sessionId, questions]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        questions:
+          type: array
+          items:
+            type: object
+            required: [id, label, question, options, allowFreeform]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              question: { type: string }
+              reason: { type: string }
+              allowFreeform: { type: boolean }
+              options:
+                type: array
+                items:
+                  type: object
+                  required: [label, value]
+                  properties:
+                    label: { type: string }
+                    value: { type: string }
+                    description: { type: string }
     LoginReport:
       description: |
         Where the model credential comes from. Never contains the credential.
