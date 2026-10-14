@@ -1,5 +1,6 @@
+import os from "node:os";
 import type { AgentToolResult } from "@step-harness/agent-core";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { ExtensionContext } from "../src/core/extensions/types.ts";
 import type {
 	StepSubagentDetails,
@@ -10,7 +11,14 @@ import type {
 import { executeSubagent } from "../src/features/subagent/execute.ts";
 import { acquireWorkflowAdmission, resetWorkflowAdmission } from "../src/features/workflow/admission.ts";
 
+beforeEach(() => {
+	// These tests exercise a four-slot window, independent of the CI host's CPU count.
+	vi.spyOn(os, "cpus").mockReturnValue(Array(6).fill(os.cpus()[0]!));
+	vi.stubEnv("STEP_WORKFLOW_CONCURRENCY_LIMIT", "");
+});
+
 afterEach(() => {
+	vi.restoreAllMocks();
 	vi.unstubAllEnvs();
 	resetWorkflowAdmission();
 });
