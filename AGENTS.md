@@ -101,6 +101,7 @@ one of these directories, read its `AGENTS.md` in full and follow it together
 with this file:
 
 - `apps/web/` — `apps/web/AGENTS.md`
+- `apps/desktop/` — `apps/desktop/AGENTS.md`
 
 ## Conversational Style
 

@@ -1,0 +1,23 @@
+{
+	"name": "@step-harness/desktop",
+	"productName": "StepCode",
+	"description": "Electron desktop shell around the StepCode Web host and React client",
+	"version": "0.84.4",
+	"private": true,
+	"type": "module",
+	"main": "dist/main.js",
+	"scripts": {
+		"build": "node scripts/build.mjs",
+		"typecheck": "tsgo -p tsconfig.json --noEmit",
+		"start": "pnpm --filter @step-harness/web build && node scripts/build.mjs && electron .",
+		"dev": "node scripts/build.mjs --ensure-web && electron .",
+		"clean": "shx rm -rf dist"
+	},
+	"dependencies": {
+		"@step-harness/web": "workspace:*"
+	},
+	"devDependencies": {
+		"electron": "44.7.0",
+		"esbuild": "0.28.1"
+	}
+}
