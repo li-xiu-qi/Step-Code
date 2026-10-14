@@ -94,6 +94,14 @@ Product:
   boundaries, provider contracts, or theme contracts, update the matching
   document under `docs/` in the same change.
 
+### Package-level rules
+
+Some packages have their own `AGENTS.md`. Before planning or editing code under
+one of these directories, read its `AGENTS.md` in full and follow it together
+with this file:
+
+- `apps/web/` — `apps/web/AGENTS.md`
+
 ## Conversational Style
 
 - Keep answers short and concise
