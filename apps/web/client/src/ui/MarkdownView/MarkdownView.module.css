@@ -1,6 +1,21 @@
 /*
  * Markdown typography lives in styles/global.css (`.message-body`, `.code-block`), shared with legacy markup.
- * The root adds nothing of its own, so the legacy wrapper classes fully decide the box.
+ * Link presentation is shared by conversation messages and Markdown previews.
  */
 .root {
+  & a {
+    color: var(--accent);
+    text-decoration: none;
+    overflow-wrap: anywhere;
+  }
+
+  & a:hover,
+  & a:focus-visible {
+    text-decoration: underline;
+  }
+
+  & a:focus-visible {
+    outline: 2px solid var(--focus-border);
+    outline-offset: 2px;
+  }
 }
