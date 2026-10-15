@@ -152,14 +152,18 @@ Both stay out of the way when there is nothing to report — the banner hides un
 the session has run a task or a subagent, and the token control hides until a
 turn reports usage — so neither shows a placeholder figure.
 
-Each finished turn (one user message up to the next) that changed files gets a
-card under its last row: "Edited N files", the summed `+added -removed` lines,
-and the files (three, then "show N more"). The data is the unified patch in the
-tool result `details.patch`: `edit` records one itself; for `write` the Web Host
-extension reads the target on `tool_call` and attaches a patch (plus
-`created`) on `tool_result`, so it is persisted with the session entry and
-survives a reload. Files over 1 MB get no patch, and files changed by `bash`
-are not tracked. Clicking a file opens the preview panel in its changes view
+Each finished turn (one user message up to the next, including a message with
+images only) that changed files gets a card under its last row: "Edited N
+files", the summed `+added -removed` lines, and the files (three, then "show N
+more"). The data is the unified patch in the tool result `details.patch`, which
+both `edit` and `write` record themselves inside the file mutation queue, so it
+is persisted with the session entry and survives a reload. A `write` patch is
+taken after approval and after earlier calls of the same batch, and the result
+also records `created` and the overwritten file's line ending and BOM
+(`previous`). A write over 1 MB or of a binary file gets no patch
+(`details.untracked` says why); the card marks such files as not revertable,
+and a turn that ran `bash` says that what those commands changed is neither
+listed nor reverted. Clicking a file opens the preview panel in its changes view
 (turn picker, one row per file, inline diff with line numbers).
 "Undo" calls `POST /api/v1/sessions/{id}/turns/{turnId}/revert`. Each card undoes
 only its own turn: the turn's patches are reverse-applied newest first, and
@@ -167,9 +171,13 @@ nothing is written unless all of them apply. Like `patch -R`, a hunk may have
 moved (later turns added lines elsewhere in the file) and its unchanged context
 lines may have been edited since; only the lines the turn itself changed must be
 intact. Otherwise the request is refused with 409 and a `code` (`conflict` with
-the file's path, `missing`, `busy` while a turn runs, `reverted`), and the card
-tells the user to undo the later turns that touched the file first. Undoing
-turns newest-first therefore always works. Files the turn created are deleted.
+the file's path, `missing`, `busy` while a turn runs or another revert of the
+session is in progress, `reverted`), and the card tells the user to undo the
+later turns that touched the file first; a prompt sent during a revert also gets
+409. Undoing turns newest-first therefore always works. Files the turn created
+are deleted, and an overwritten file gets its previous line ending and BOM back.
+Files without a patch are left alone and listed in the response's `skipped`,
+which the toast names.
 A successful undo appends a `stepcode-web.turn-revert` custom message (in the
 model's context, not a new turn) naming the request and the restored files, so
 the model does not assume its edits are still on disk; the snapshot's

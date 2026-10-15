@@ -124,15 +124,28 @@ export function mergeSessionSummary(
 }
 
 /**
- * The file change of a finished edit/write call: the host records a unified
- * patch in the result details of both (runtime.ts `WriteCapture`).
+ * The file change of a finished edit/write call: both tools record a unified
+ * patch in their result details; `write` says why when it recorded none.
  */
 function fileChange(name: string, args: unknown, result: AgentMessage | undefined): FileChange | undefined {
 	if ((name !== "edit" && name !== "write") || !result || result.isError) return undefined;
-	const patch = (result.details as { patch?: unknown } | undefined)?.patch;
+	const details = (result.details ?? {}) as { patch?: unknown; untracked?: unknown };
 	const input = (args ?? {}) as { path?: unknown; file_path?: unknown };
 	const path = typeof input.path === "string" ? input.path : input.file_path;
-	return typeof patch === "string" && typeof path === "string" && path ? { path, patch } : undefined;
+	if (typeof path !== "string" || !path.trim()) return undefined;
+	if (typeof details.patch === "string") return { path, patch: details.patch };
+	const reason = details.untracked;
+	return {
+		path,
+		untracked: reason === "too_large" || reason === "binary" || reason === "unreadable" ? reason : "unknown",
+	};
+}
+
+/** Image parts of a message's content. */
+function imageCount(content: unknown): number {
+	return Array.isArray(content)
+		? (content as readonly ContentPart[]).filter((part) => part?.type === "image").length
+		: 0;
 }
 
 /** Project session entries into timeline rows (legacy `timelineFromEntries`, 2055-2096). */
@@ -149,13 +162,16 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		const message = entry.message;
 		if (message.role === "toolResult") continue;
 		const text = contentText(message.content);
-		if (text) {
+		const images = message.role === "user" ? imageCount(message.content) : 0;
+		// Every user message opens a turn (the host's turn boundary), even one without text.
+		if (text || message.role === "user") {
 			items.push({
 				itemId: `message-${entry.id}`,
 				entryId: entry.id,
 				kind: "message",
 				role: message.role,
 				content: text,
+				...(images ? { images } : {}),
 				usage: entry.usage,
 				timestamp: entry.timestamp,
 			});
@@ -363,11 +379,16 @@ function handleAgentEvent(agentEvent: AgentStreamEvent): void {
 		// The prompt entered the loop: show it in place now; the refresh after
 		// its message_end replaces this row with the recorded entry.
 		const content = contentText(agentEvent.message.content);
+		const images = imageCount(agentEvent.message.content);
 		setState((state) => ({
 			pendingTurn: null,
-			timelineItems: content
-				? upsertItem(state.timelineItems, { itemId: "message-user-live", kind: "message", role: "user", content })
-				: state.timelineItems,
+			timelineItems: upsertItem(state.timelineItems, {
+				itemId: "message-user-live",
+				kind: "message",
+				role: "user",
+				content,
+				...(images ? { images } : {}),
+			}),
 		}));
 	}
 	if (agentEvent.type === "tool_execution_start") {

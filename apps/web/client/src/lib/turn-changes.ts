@@ -1,12 +1,12 @@
 /**
  * Per-turn file changes, derived from the timeline. A turn runs from one user
  * message to the next; its changes are the successful edit/write calls in it,
- * each carrying the unified patch the host recorded (`ToolTimelineItem.change`).
+ * each carrying the unified patch the tool recorded (`ToolTimelineItem.change`).
  * The host has its own copy of the patch reader for reverting
  * (src/turn-changes.ts); the two cannot share code.
  */
 
-import type { TimelineItem } from "../state/types";
+import type { TimelineItem, UntrackedReason } from "../state/types";
 
 export interface DiffLine {
 	readonly kind: "add" | "del" | "context" | "hunk";
@@ -74,6 +74,8 @@ export interface ChangedFile {
 	readonly path: string;
 	/** Patches in the order they were made. */
 	readonly patches: readonly string[];
+	/** A change of this file has no patch: it is not shown as a diff and undo skips it. */
+	readonly untracked?: UntrackedReason;
 	readonly additions: number;
 	readonly deletions: number;
 }
@@ -90,6 +92,8 @@ export interface TurnChanges {
 	readonly files: readonly ChangedFile[];
 	readonly additions: number;
 	readonly deletions: number;
+	/** `bash` calls in the turn: what they changed is not tracked. */
+	readonly bashCalls: number;
 }
 
 /** `path` relative to `cwd` when it lies inside it, without a leading `./`. */
@@ -118,28 +122,70 @@ export function parsedPatch(patch: string): ParsedPatch {
 	return parsed;
 }
 
-/** Turns that changed at least one file, oldest first. */
+interface TurnDraft {
+	readonly turnId: string;
+	readonly ordinal: number;
+	lastIndex: number;
+	bashCalls: number;
+	readonly files: Map<string, { patches: string[]; untracked?: UntrackedReason }>;
+}
+
+function sameFile(left: ChangedFile, right: ChangedFile): boolean {
+	return (
+		left.path === right.path &&
+		left.untracked === right.untracked &&
+		left.patches.length === right.patches.length &&
+		left.patches.every((patch, index) => patch === right.patches[index])
+	);
+}
+
+function sameTurn(left: TurnChanges, right: TurnChanges): boolean {
+	return (
+		left.ordinal === right.ordinal &&
+		left.latest === right.latest &&
+		left.lastIndex === right.lastIndex &&
+		left.bashCalls === right.bashCalls &&
+		left.files.length === right.files.length &&
+		left.files.every((file, index) => file === right.files[index])
+	);
+}
+
+/** The last result per turn id: a stream frame regroups the timeline, unchanged turns keep their objects. */
+let previousTurns = new Map<string, TurnChanges>();
+
+/**
+ * Turns that changed at least one file, oldest first. A turn or file whose
+ * content did not change since the previous call is the same object, so
+ * memoised cards and diffs skip re-rendering.
+ */
 export function collectTurnChanges(items: readonly TimelineItem[], cwd: string): TurnChanges[] {
-	const turns: Array<{ turnId: string; ordinal: number; lastIndex: number; files: Map<string, string[]> }> = [];
+	const turns: TurnDraft[] = [];
 	let ordinal = 0;
 	items.forEach((item, index) => {
 		if (item.kind === "message" && item.role === "user") {
 			ordinal += 1;
-			turns.push({ turnId: item.entryId ?? item.itemId, ordinal, lastIndex: index, files: new Map() });
+			turns.push({ turnId: item.entryId ?? item.itemId, ordinal, lastIndex: index, bashCalls: 0, files: new Map() });
 			return;
 		}
-		if (!turns.length) turns.push({ turnId: "", ordinal: 0, lastIndex: index, files: new Map() });
+		if (!turns.length) turns.push({ turnId: "", ordinal: 0, lastIndex: index, bashCalls: 0, files: new Map() });
 		const turn = turns[turns.length - 1];
 		if (item.kind === "approval") return;
 		turn.lastIndex = index;
-		if (item.kind !== "tool" || !item.change) return;
+		if (item.kind !== "tool") return;
+		if (item.toolName === "bash") turn.bashCalls += 1;
+		if (!item.change) return;
 		const path = displayPath(item.change.path, cwd);
-		turn.files.set(path, [...(turn.files.get(path) ?? []), item.change.patch]);
+		const file = turn.files.get(path) ?? { patches: [] };
+		if (item.change.patch !== undefined) file.patches.push(item.change.patch);
+		else file.untracked ??= item.change.untracked ?? "unknown";
+		turn.files.set(path, file);
 	});
-	return turns
+	const next = new Map<string, TurnChanges>();
+	const result = turns
 		.filter((turn) => turn.files.size && turn.turnId)
 		.map((turn) => {
-			const files = [...turn.files].map(([path, patches]) => {
+			const previous = previousTurns.get(turn.turnId);
+			const files = [...turn.files].map(([path, { patches, untracked }]) => {
 				let additions = 0;
 				let deletions = 0;
 				for (const patch of patches) {
@@ -147,9 +193,10 @@ export function collectTurnChanges(items: readonly TimelineItem[], cwd: string):
 					additions += parsed.additions;
 					deletions += parsed.deletions;
 				}
-				return { path, patches, additions, deletions };
+				const file: ChangedFile = { path, patches, ...(untracked ? { untracked } : {}), additions, deletions };
+				return previous?.files.find((candidate) => sameFile(candidate, file)) ?? file;
 			});
-			return {
+			const changes: TurnChanges = {
 				turnId: turn.turnId,
 				ordinal: turn.ordinal,
 				latest: turn.ordinal === ordinal,
@@ -157,6 +204,12 @@ export function collectTurnChanges(items: readonly TimelineItem[], cwd: string):
 				files,
 				additions: files.reduce((sum, file) => sum + file.additions, 0),
 				deletions: files.reduce((sum, file) => sum + file.deletions, 0),
+				bashCalls: turn.bashCalls,
 			};
+			const kept = previous && sameTurn(previous, changes) ? previous : changes;
+			next.set(turn.turnId, kept);
+			return kept;
 		});
+	previousTurns = next;
+	return result;
 }

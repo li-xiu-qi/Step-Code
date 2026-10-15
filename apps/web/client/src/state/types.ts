@@ -143,6 +143,8 @@ export interface MessageTimelineItem {
 	readonly entryId?: string;
 	readonly role: string;
 	readonly content: string;
+	/** Images attached to a user message; a message can be images only. */
+	readonly images?: number;
 	readonly usage?: Usage;
 	readonly timestamp?: string;
 }
@@ -163,9 +165,21 @@ export interface ToolTimelineItem {
 	readonly change?: FileChange;
 }
 
+/** Why an edit/write has no patch (host `SkippedChange.reason`). */
+export type UntrackedReason = "too_large" | "binary" | "unreadable" | "unknown";
+
 export interface FileChange {
 	readonly path: string;
-	readonly patch: string;
+	/** Unified patch, LF. Absent when none was recorded; then `untracked` says why. */
+	readonly patch?: string;
+	readonly untracked?: UntrackedReason;
+}
+
+/** Response of `POST /sessions/{id}/turns/{turnId}/revert`. */
+export interface TurnRevertResult {
+	readonly snapshot: SessionSnapshot;
+	readonly paths: readonly string[];
+	readonly skipped: ReadonlyArray<{ readonly path: string; readonly reason: UntrackedReason }>;
 }
 
 export interface ApprovalTimelineItem {

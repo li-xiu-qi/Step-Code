@@ -445,8 +445,48 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.turn-change-file .diff-stat {
+.turn-change-file .diff-stat,
+.turn-change-untracked {
 	margin-left: auto;
+}
+.turn-change-untracked {
+	flex: none;
+	color: var(--ink-3);
+	font-size: 12px;
+}
+/* Full path on hover, like the sidebar's data-tooltip; above the row, since the card clips what overflows it. */
+.turn-change-file[data-tooltip] {
+	position: relative;
+}
+.turn-change-file[data-tooltip]::after {
+	position: absolute;
+	bottom: calc(100% - 4px);
+	left: 12px;
+	z-index: 40;
+	display: none;
+	width: max-content;
+	max-width: calc(100% - 24px);
+	padding: 5px 8px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-input);
+	background: var(--surface);
+	color: var(--ink-2);
+	box-shadow: 0 6px 18px var(--shadow);
+	content: attr(data-tooltip);
+	font-size: 11px;
+	font-weight: 400;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+}
+.turn-change-file[data-tooltip]:hover::after,
+.turn-change-file[data-tooltip]:focus-visible::after {
+	display: block;
+}
+.turn-changes-note {
+	padding: 8px 12px;
+	border-top: 1px solid var(--line);
+	color: var(--ink-3);
+	font-size: 12px;
 }
 .turn-changes-more {
 	gap: 6px;

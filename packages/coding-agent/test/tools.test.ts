@@ -5,7 +5,7 @@ import { join } from "path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { executeBashWithOperations } from "../src/core/bash-executor.ts";
 import { type BashOperations, createBashTool, createLocalBashOperations } from "../src/core/tools/bash.ts";
-import { computeEditsDiff } from "../src/core/tools/edit-diff.ts";
+import { computeEditsDiff, generateUnifiedPatch } from "../src/core/tools/edit-diff.ts";
 import {
 	createEditTool,
 	createFindTool,
@@ -249,7 +249,10 @@ describe("Coding Agent Tools", () => {
 
 			expect(getTextOutput(result)).toContain("Successfully wrote");
 			expect(getTextOutput(result)).toContain(testFile);
-			expect(result.details).toBeUndefined();
+			expect(result.details).toEqual({
+				patch: generateUnifiedPatch(testFile, "", content),
+				created: true,
+			});
 		});
 
 		it("should create parent directories", async () => {

@@ -373,6 +373,7 @@ const server = createServer(async (request, response) => {
 				if (typeof input.text !== "string" || !input.text.trim()) return error(response, 400, "text is required");
 				const attachments = readAttachments(input.attachments);
 				if (attachments instanceof Error) return error(response, 400, attachments.message);
+				if (session.isReverting()) return error(response, 409, "Wait for the revert to finish");
 				void session.send(input.text, attachments ?? []).catch((caught) => {
 					session.publishError(caught instanceof Error ? caught.message : String(caught));
 				});
@@ -415,8 +416,8 @@ const server = createServer(async (request, response) => {
 			}
 			if (parts[4] === "turns" && parts[5] && parts[6] === "revert" && parts.length === 7 && method === "POST") {
 				try {
-					const paths = await session.revertTurn(decodeURIComponent(parts[5]));
-					return json(response, 200, { snapshot: session.snapshot(), paths });
+					const { paths, skipped } = await session.revertTurn(decodeURIComponent(parts[5]));
+					return json(response, 200, { snapshot: session.snapshot(), paths, skipped });
 				} catch (caught) {
 					// A file changed since the turn, or the turn is running: the caller's state, not a server fault.
 					if (caught instanceof TurnRevertError)

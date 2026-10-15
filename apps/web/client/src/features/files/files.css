@@ -471,6 +471,39 @@
 	outline: 2px solid var(--focus-border);
 	outline-offset: -2px;
 }
+/* Full path on hover, like the sidebar's data-tooltip. */
+.changes-file-toggle[data-tooltip] {
+	position: relative;
+}
+.changes-file-toggle[data-tooltip]::after {
+	position: absolute;
+	top: calc(100% - 4px);
+	left: 16px;
+	z-index: 40;
+	display: none;
+	width: max-content;
+	max-width: calc(100% - 24px);
+	padding: 5px 8px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-input);
+	background: var(--surface);
+	color: var(--ink-2);
+	box-shadow: 0 6px 18px var(--shadow);
+	content: attr(data-tooltip);
+	font-size: 11px;
+	font-weight: 400;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+}
+.changes-file-toggle[data-tooltip]:hover::after,
+.changes-file-toggle[data-tooltip]:focus-visible::after {
+	display: block;
+}
+.changes-untracked {
+	padding: 10px 16px;
+	color: var(--ink-3);
+	font-size: 12px;
+}
 .changes-file-path {
 	display: flex;
 	flex: 1;

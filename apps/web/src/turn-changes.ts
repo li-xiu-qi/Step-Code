@@ -1,97 +1,44 @@
 /**
  * File changes per conversation turn.
  *
- * `edit` already records a unified patch in its tool result (`details.patch`).
- * `write` records nothing, so the host reads the target before the call and
- * attaches the same kind of patch to the result; the patch is persisted with
- * the session entry and the client derives each turn's change card from it.
+ * `edit` and `write` record a unified patch in their tool result
+ * (`details.patch`, LF without BOM); `write` also records the overwritten
+ * file's line ending and BOM, or why it recorded no patch. The client derives
+ * each turn's change card from the same details.
  *
  * A turn is the run of entries from one user message to the next. Reverting a
- * turn reverse-applies its patches, newest first, and writes nothing unless
- * every patch still matches the files on disk.
+ * turn reverse-applies its own patches, newest first, and writes nothing unless
+ * every patch still applies. Changes without a patch (large or binary files,
+ * `bash`) cannot be reverted and are reported as skipped. A revert is recorded
+ * as a custom message on the branch, which also tells the model.
  */
 
-import { readFile, stat, unlink, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
-import type { SessionEntry } from "@step-harness/coding-agent";
-
-/** Larger files are written without a patch; the diff would bloat the session file. */
-export const MAX_PATCHED_FILE_BYTES = 1_000_000;
-
-export interface WriteChangeDetails {
-	readonly patch: string;
-	/** The file did not exist before the write; reverting deletes it. */
-	readonly created: boolean;
-}
-
-/** Same resolution as the coding tools: `@` prefix stripped, `~` expanded, relative to cwd. */
-export function resolveToolPath(path: string, cwd: string): string {
-	let value = path.trim().replace(/^@/, "");
-	if (value === "~") value = homedir();
-	else if (value.startsWith("~/")) value = `${homedir()}${value.slice(1)}`;
-	return isAbsolute(value) ? value : resolve(cwd, value);
-}
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import {
+	detectLineEnding,
+	normalizeToLF,
+	resolveToCwd,
+	restoreLineEndings,
+	type SessionEntry,
+	type WriteToolDetails,
+} from "@step-harness/coding-agent";
 
 function toolPath(input: Readonly<Record<string, unknown>>): string | undefined {
 	const value = input.path ?? input.file_path;
 	return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-function normalizeText(text: string): string {
-	return text.replace(/^﻿/, "").replace(/\r\n/g, "\n");
-}
+/** Why a revert was refused; `path` is the file as the tool call named it. */
+export type TurnRevertCode = "busy" | "reverted" | "empty" | "missing" | "conflict";
 
-/** `generateUnifiedPatch` from the coding agent; injected so host tests need no built packages. */
-export type UnifiedPatch = (path: string, before: string, after: string) => string;
+export class TurnRevertError extends Error {
+	readonly code: TurnRevertCode;
+	readonly path?: string;
 
-/** Previous content of `write` targets, keyed by tool call id until the result arrives. */
-export class WriteCapture {
-	private readonly before = new Map<string, string | null>();
-	private readonly unifiedPatch: UnifiedPatch;
-
-	constructor(unifiedPatch: UnifiedPatch) {
-		this.unifiedPatch = unifiedPatch;
-	}
-
-	/** Read the target of a `write` call before it runs. Unreadable or large files are skipped. */
-	async capture(toolCallId: string, toolName: string, input: Readonly<Record<string, unknown>>, cwd: string) {
-		if (toolName !== "write") return;
-		const path = toolPath(input);
-		if (!path) return;
-		const absolute = resolveToolPath(path, cwd);
-		try {
-			const info = await stat(absolute);
-			if (!info.isFile() || info.size > MAX_PATCHED_FILE_BYTES) return;
-			const content = await readFile(absolute, "utf8");
-			if (content.includes("\u0000")) return;
-			this.before.set(toolCallId, content);
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") this.before.set(toolCallId, null);
-		}
-	}
-
-	/** The details to attach to a finished `write`, or undefined to leave the result alone. */
-	details(
-		toolCallId: string,
-		toolName: string,
-		input: Readonly<Record<string, unknown>>,
-		isError: boolean,
-	): WriteChangeDetails | undefined {
-		if (toolName !== "write" || !this.before.has(toolCallId)) return undefined;
-		const before = this.before.get(toolCallId) ?? null;
-		this.before.delete(toolCallId);
-		const path = toolPath(input);
-		const content = input.content;
-		if (isError || !path || typeof content !== "string" || content.length > MAX_PATCHED_FILE_BYTES) return undefined;
-		return {
-			patch: this.unifiedPatch(path, normalizeText(before ?? ""), normalizeText(content)),
-			created: before === null,
-		};
-	}
-
-	clear(): void {
-		this.before.clear();
+	constructor(code: TurnRevertCode, message: string, path?: string) {
+		super(message);
+		this.code = code;
+		this.path = path;
 	}
 }
 
@@ -225,25 +172,26 @@ export function reversePatch(content: string, patch: string): string {
 
 /* ── Turns ───────────────────────────────────────────────────────────────── */
 
-/** Why a revert was refused; `path` is the file as the tool call named it. */
-export type TurnRevertCode = "busy" | "reverted" | "empty" | "missing" | "conflict";
-
-export class TurnRevertError extends Error {
-	readonly code: TurnRevertCode;
-	readonly path?: string;
-
-	constructor(code: TurnRevertCode, message: string, path?: string) {
-		super(message);
-		this.code = code;
-		this.path = path;
-	}
-}
+type LineEnding = "\r\n" | "\n";
 
 export interface TurnChange {
 	readonly toolCallId: string;
 	readonly path: string;
 	readonly patch: string;
 	readonly created: boolean;
+	/** Line ending and BOM of the file a `write` replaced. */
+	readonly previous?: { readonly lineEnding: LineEnding; readonly bom: boolean };
+}
+
+/** A successful edit/write with no patch to reverse. */
+export interface SkippedChange {
+	readonly path: string;
+	readonly reason: NonNullable<WriteToolDetails["untracked"]> | "unknown";
+}
+
+export interface TurnChangeSet {
+	readonly changes: readonly TurnChange[];
+	readonly skipped: readonly SkippedChange[];
 }
 
 function isUserMessage(entry: SessionEntry): boolean {
@@ -289,12 +237,13 @@ export function turnRevertNotice(
 	].join("\n");
 }
 
-/** Successful edit/write patches of the turn that starts at the user entry `turnId`, in order. */
-export function turnChanges(entries: readonly SessionEntry[], turnId: string): TurnChange[] {
+/** Successful edit/write calls of the turn that starts at the user entry `turnId`, in order. */
+export function turnChanges(entries: readonly SessionEntry[], turnId: string): TurnChangeSet {
 	const start = entries.findIndex((entry) => entry.id === turnId && isUserMessage(entry));
-	if (start < 0) return [];
-	const calls = new Map<string, { name: string; path?: string }>();
 	const changes: TurnChange[] = [];
+	const skipped: SkippedChange[] = [];
+	if (start < 0) return { changes, skipped };
+	const calls = new Map<string, { name: string; path?: string }>();
 	for (const entry of entries.slice(start + 1)) {
 		if (isUserMessage(entry)) break;
 		if (entry.type !== "message") continue;
@@ -314,17 +263,30 @@ export function turnChanges(entries: readonly SessionEntry[], turnId: string): T
 		}
 		if (message.role !== "toolResult" || message.isError || !message.toolCallId) continue;
 		const call = calls.get(message.toolCallId);
-		const details = message.details as { patch?: unknown; created?: unknown } | undefined;
-		if (!call?.path || (call.name !== "edit" && call.name !== "write") || typeof details?.patch !== "string")
+		if (!call?.path || (call.name !== "edit" && call.name !== "write")) continue;
+		const details = (message.details ?? {}) as WriteToolDetails;
+		if (typeof details.patch !== "string") {
+			skipped.push({ path: call.path, reason: details.untracked ?? "unknown" });
 			continue;
+		}
+		const write = call.name === "write";
 		changes.push({
 			toolCallId: message.toolCallId,
 			path: call.path,
 			patch: details.patch,
-			created: call.name === "write" && details.created === true,
+			created: write && details.created === true,
+			...(write && details.previous ? { previous: details.previous } : {}),
 		});
 	}
-	return changes;
+	return { changes, skipped };
+}
+
+interface RevertFile {
+	/** LF, without BOM: the view the patches were made against. */
+	content: string;
+	lineEnding: LineEnding;
+	bom: boolean;
+	deleted: boolean;
 }
 
 /**
@@ -332,10 +294,11 @@ export function turnChanges(entries: readonly SessionEntry[], turnId: string): T
  * written unless all patches apply. Returns the absolute paths touched.
  */
 export async function revertTurnChanges(changes: readonly TurnChange[], cwd: string): Promise<string[]> {
-	if (!changes.length) throw new TurnRevertError("empty", "This turn changed no files");
-	const files = new Map<string, { content: string; crlf: boolean; bom: boolean; deleted: boolean }>();
+	if (!changes.length) throw new TurnRevertError("empty", "This turn has no file changes that can be reverted");
+	const files = new Map<string, RevertFile>();
 	for (const change of [...changes].reverse()) {
-		const absolute = resolveToolPath(change.path, cwd);
+		const absolute = resolveToCwd(change.path, cwd);
+		const conflict = () => new TurnRevertError("conflict", `${change.path} changed since this turn`, change.path);
 		let file = files.get(absolute);
 		if (!file) {
 			let raw: string;
@@ -344,19 +307,24 @@ export async function revertTurnChanges(changes: readonly TurnChange[], cwd: str
 			} catch {
 				throw new TurnRevertError("missing", `${change.path} no longer exists`, change.path);
 			}
-			file = { content: normalizeText(raw), crlf: raw.includes("\r\n"), bom: raw.startsWith("﻿"), deleted: false };
+			const bom = raw.startsWith("﻿");
+			const text = bom ? raw.slice(1) : raw;
+			file = { content: normalizeToLF(text), lineEnding: detectLineEnding(text), bom, deleted: false };
 			files.set(absolute, file);
 		}
-		if (file.deleted) throw new TurnRevertError("conflict", `${change.path} changed since this turn`, change.path);
+		if (file.deleted) throw conflict();
 		try {
 			file.content = reversePatch(file.content, change.patch);
 		} catch {
-			throw new TurnRevertError("conflict", `${change.path} changed since this turn`, change.path);
+			throw conflict();
 		}
 		if (change.created) {
-			if (file.content !== "")
-				throw new TurnRevertError("conflict", `${change.path} changed since this turn`, change.path);
+			if (file.content !== "") throw conflict();
 			file.deleted = true;
+		} else if (change.previous) {
+			// A write replaced the whole file, line endings and BOM included.
+			file.lineEnding = change.previous.lineEnding;
+			file.bom = change.previous.bom;
 		}
 	}
 	for (const [absolute, file] of files) {
@@ -364,8 +332,44 @@ export async function revertTurnChanges(changes: readonly TurnChange[], cwd: str
 			await unlink(absolute);
 			continue;
 		}
-		const text = file.crlf ? file.content.replace(/\n/g, "\r\n") : file.content;
+		const text = restoreLineEndings(file.content, file.lineEnding);
 		await writeFile(absolute, file.bom ? `﻿${text}` : text, "utf8");
 	}
 	return [...files.keys()];
+}
+
+/**
+ * The lock around reverting one session's turns. Checks and writes are
+ * asynchronous, so without it a second request (double click, another tab)
+ * passes the checks while the first is still writing files. Which turns are
+ * reverted is read from the branch (`revertedTurnIds`).
+ */
+export class TurnReverter {
+	private busy = false;
+
+	/** A revert is writing files or recording its turn. */
+	isBusy(): boolean {
+		return this.busy;
+	}
+
+	/** Revert the turn `turnId`; `record` appends the revert entry once the files are written. */
+	async revert(
+		turnId: string,
+		entries: readonly SessionEntry[],
+		cwd: string,
+		record: (turnId: string, changes: readonly TurnChange[], paths: readonly string[]) => Promise<void>,
+	): Promise<{ paths: string[]; skipped: readonly SkippedChange[] }> {
+		if (this.busy) throw new TurnRevertError("busy", "This session is already reverting a turn");
+		if (revertedTurnIds(entries).includes(turnId))
+			throw new TurnRevertError("reverted", "This turn was already reverted");
+		this.busy = true;
+		try {
+			const { changes, skipped } = turnChanges(entries, turnId);
+			const paths = await revertTurnChanges(changes, cwd);
+			await record(turnId, changes, paths);
+			return { paths, skipped };
+		} finally {
+			this.busy = false;
+		}
+	}
 }

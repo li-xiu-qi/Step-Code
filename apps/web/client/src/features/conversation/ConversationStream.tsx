@@ -59,27 +59,6 @@ function scrollToEnd(stream: HTMLElement | null): void {
 const STICK_THRESHOLD = 48;
 
 /**
- * Index of each turn's closing assistant message: only it gets the action row,
- * so intermediate replies between tool calls stay compact. The running turn
- * has none yet.
- */
-function turnEndMessages(items: readonly TimelineItem[], running: boolean): ReadonlySet<number> {
-	const ends = new Set<number>();
-	let candidate = -1;
-	items.forEach((item, index) => {
-		// A reply followed by tool calls (an interrupted turn) is not the turn's end.
-		if (item.kind === "tool") candidate = -1;
-		if (item.kind !== "message") return;
-		if (item.role === "user") {
-			if (candidate >= 0) ends.add(candidate);
-			candidate = -1;
-		} else candidate = index;
-	});
-	if (candidate >= 0 && !running) ends.add(candidate);
-	return ends;
-}
-
-/**
  * `#stream > #streamInner`: the session timeline (legacy `renderTimeline`,
  * app.js 2246-2281). New output keeps the view pinned to the bottom only while
  * the reader is there: scrolling up during a turn leaves the view alone.
@@ -100,7 +79,6 @@ export function ConversationStream() {
 	const stick = useRef(true);
 	const keys = itemKeys(items);
 	const turns = useMemo(() => collectTurnChanges(items, cwd), [items, cwd]);
-	const ends = useMemo(() => turnEndMessages(items, busy || pendingTurn !== null), [items, busy, pendingTurn]);
 
 	// A new session or a sent message: follow the bottom again.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: the session id and the pending message are the triggers.
@@ -145,7 +123,7 @@ export function ConversationStream() {
 							return (
 								<Fragment key={keys[index]}>
 									{item.kind === "message" ? (
-										<MessageItem item={item} showActions={ends.has(index)} />
+										<MessageItem item={item} />
 									) : item.kind === "tool" ? (
 										<ToolRow item={item} />
 									) : (

@@ -367,9 +367,12 @@ export {
 export { BUILTIN_SLASH_COMMANDS } from "./core/slash-commands.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
+	detectLineEnding,
 	type EditDiffResult,
 	generateDiffString,
 	generateUnifiedPatch,
+	normalizeToLF,
+	restoreLineEndings,
 } from "./core/tools/edit-diff.ts";
 // Tools
 export {
@@ -427,10 +430,12 @@ export {
 	truncateLine,
 	truncateTail,
 	type WriteOperations,
+	type WriteToolDetails,
 	type WriteToolInput,
 	type WriteToolOptions,
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
+export { resolveToCwd } from "./core/tools/path-utils.ts";
 export { getTextOutput, renderToolPath, replaceTabs } from "./core/tools/render-utils.ts";
 export {
 	getProjectTrustOptions,

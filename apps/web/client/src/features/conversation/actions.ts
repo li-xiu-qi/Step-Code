@@ -6,7 +6,7 @@ import { t } from "../../i18n";
 import { ApiError, apiSend, errorMessage } from "../../lib/api";
 import { forgetApproval, openSession, refreshSessions, renderSnapshot, showError } from "../../state/session";
 import { getState } from "../../state/store";
-import type { SessionSnapshot } from "../../state/types";
+import type { TurnRevertResult } from "../../state/types";
 
 export type ApprovalVerdict = "deny" | "approve" | "approve_for_session";
 
@@ -67,12 +67,20 @@ export async function revertTurn(turnId: string): Promise<boolean> {
 	const current = getState().current;
 	if (!current) return false;
 	try {
-		const result = await apiSend<{ snapshot: SessionSnapshot; paths: string[] }>(
+		const result = await apiSend<TurnRevertResult>(
 			`/api/v1/sessions/${current.id}/turns/${encodeURIComponent(turnId)}/revert`,
 			"POST",
 		);
 		if (getState().current?.id === current.id) renderSnapshot(result.snapshot);
-		showError(t("turnRevertedToast", { count: result.paths.length }), false);
+		const count = result.paths.length;
+		const skipped = [...new Set(result.skipped.map((change) => change.path))];
+		// Files without a recorded diff stay as they are; say so instead of a plain success.
+		showError(
+			skipped.length
+				? t("turnRevertedSkippedToast", { count, paths: skipped.join(", ") })
+				: t("turnRevertedToast", { count }),
+			false,
+		);
 		return true;
 	} catch (error) {
 		showError(revertFailure(error));

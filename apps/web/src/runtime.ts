@@ -20,7 +20,6 @@ import {
 	createUltraloopOptInExtension,
 	DefaultResourceLoader,
 	type ExtensionUIContext,
-	generateUnifiedPatch,
 	getStepAuthPath,
 	getStepMcpStatuses,
 	type InlineExtension,
@@ -54,12 +53,11 @@ import { feedbackCategoryFor } from "./feedback.ts";
 import { type WebSkill, webSkills } from "./skills.ts";
 import {
 	revertedTurnIds,
-	revertTurnChanges,
+	type SkippedChange,
 	TURN_REVERT_TYPE,
 	TurnRevertError,
-	turnChanges,
+	TurnReverter,
 	turnRevertNotice,
-	WriteCapture,
 } from "./turn-changes.ts";
 import { claimWebSessionWriter } from "./writer-lease.ts";
 
@@ -174,11 +172,7 @@ function webUiContext(broker: ApprovalBroker, clarifications: ClarificationBroke
 	};
 }
 
-function makeExtensions(
-	settingsManager: StepSettingsManager,
-	broker: ApprovalBroker,
-	writes: WriteCapture,
-): InlineExtension[] {
+function makeExtensions(settingsManager: StepSettingsManager, broker: ApprovalBroker): InlineExtension[] {
 	const telemetry = NOOP_OBSERVABILITY_PROVIDER.createReporter();
 	const persisted = settingsManager.getStepSettings();
 	const permission = {
@@ -189,14 +183,8 @@ function makeExtensions(
 		name: "StepCode Web host",
 		hidden: true,
 		factory: (pi) => {
-			pi.on("tool_call", async (event, context) => {
+			pi.on("tool_call", (event) => {
 				broker.captureToolCall(event.toolCallId, event.toolName, event.input);
-				// Before the write runs: its result gets a patch so the turn card can show the diff.
-				await writes.capture(event.toolCallId, event.toolName, event.input, context.cwd);
-			});
-			pi.on("tool_result", (event) => {
-				const details = writes.details(event.toolCallId, event.toolName, event.input, event.isError);
-				return details ? { details } : undefined;
 			});
 			pi.on("session_start", (_event, context) => {
 				context.ui.notify("StepCode Web session ready");
@@ -243,7 +231,6 @@ function projectEntry(entry: SessionEntry): Record<string, unknown> {
 export class WebSession {
 	readonly broker: ApprovalBroker;
 	readonly clarifications: ClarificationBroker;
-	private readonly writes = new WriteCapture(generateUnifiedPatch);
 	private readonly listeners = new Set<(event: WebEvent) => void>();
 	private runtime!: AgentSessionRuntime;
 	private session!: AgentSession;
@@ -254,6 +241,7 @@ export class WebSession {
 	private releaseWriterLease?: () => void;
 	private writerLeasePath?: string;
 	private archived = false;
+	private readonly reverter = new TurnReverter();
 
 	private constructor(
 		id: string,
@@ -375,7 +363,7 @@ export class WebSession {
 				configDirName: resolveStepConfigDir(),
 				settingsManager,
 				modelRuntime: this.modelRuntime,
-				resourceLoaderOptions: { extensionFactories: makeExtensions(settingsManager, this.broker, this.writes) },
+				resourceLoaderOptions: { extensionFactories: makeExtensions(settingsManager, this.broker) },
 			});
 			// Resolve the model against a populated catalog. `models.json` is only an
 			// offline baseline and Step ships none, so an unrefreshed runtime offers
@@ -529,7 +517,13 @@ export class WebSession {
 		}
 	}
 
+	/** A revert is writing files right now; prompts wait for it. */
+	isReverting(): boolean {
+		return this.reverter.isBusy();
+	}
+
 	async send(text: string, attachments: readonly WebAttachment[] = []): Promise<void> {
+		if (this.isReverting()) throw new Error("Wait for the revert to finish");
 		this.unread = false;
 		const images = attachments
 			.filter((attachment) => attachment.kind === "image")
@@ -744,30 +738,26 @@ export class WebSession {
 	 * turn): otherwise it still believes its edits are on disk. The same entry
 	 * marks the turn as reverted, so the state follows the session branch.
 	 */
-	async revertTurn(turnId: string): Promise<string[]> {
+	async revertTurn(turnId: string): Promise<{ paths: string[]; skipped: readonly SkippedChange[] }> {
 		if (this.status === "running" || this.status === "waiting")
 			throw new TurnRevertError("busy", "Stop the running turn first");
 		const branch = this.session.sessionManager.getBranch();
-		if (revertedTurnIds(branch).includes(turnId))
-			throw new TurnRevertError("reverted", "This turn was already reverted");
-		const changes = turnChanges(branch, turnId);
-		const paths = await revertTurnChanges(changes, this.cwd);
-		await this.session.sendCustomMessage(
-			{
-				customType: TURN_REVERT_TYPE,
-				content: turnRevertNotice(branch, turnId, changes),
-				display: false,
-				details: { turnId, paths },
-			},
-			{ triggerTurn: false },
+		return this.reverter.revert(turnId, branch, this.cwd, (turn, changes, paths) =>
+			this.session.sendCustomMessage(
+				{
+					customType: TURN_REVERT_TYPE,
+					content: turnRevertNotice(branch, turn, changes),
+					display: false,
+					details: { turnId: turn, paths },
+				},
+				{ triggerTurn: false },
+			),
 		);
-		return paths;
 	}
 
 	async close(): Promise<void> {
 		this.clarifications.clear();
 		this.broker.clear();
-		this.writes.clear();
 		this.unsubscribeSession?.();
 		await this.runtime.dispose();
 		this.unsubscribeRuntimeSessionChange?.();

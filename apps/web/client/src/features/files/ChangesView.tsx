@@ -85,6 +85,13 @@ const FileDiff = memo(function FileDiff({ file }: { readonly file: ChangedFile }
 	);
 });
 
+const UNTRACKED_TEXT = {
+	too_large: "untrackedTooLarge",
+	binary: "untrackedBinary",
+	unreadable: "untrackedUnreadable",
+	unknown: "untrackedUnknown",
+} as const;
+
 function FileRow({
 	file,
 	cwd,
@@ -109,7 +116,7 @@ function FileRow({
 					type="button"
 					className="changes-file-toggle"
 					aria-expanded={expanded}
-					title={file.path}
+					data-tooltip={file.path}
 					onClick={() => toggleChangedFile(file.path)}
 				>
 					<FileBadge path={file.path} />
@@ -170,7 +177,12 @@ function FileRow({
 					</Menu>
 				</Popover>
 			</div>
-			{expanded ? <FileDiff file={file} /> : null}
+			{expanded ? (
+				<>
+					{file.patches.length ? <FileDiff file={file} /> : null}
+					{file.untracked ? <p className="changes-untracked">{t(UNTRACKED_TEXT[file.untracked])}</p> : null}
+				</>
+			) : null}
 		</li>
 	);
 }

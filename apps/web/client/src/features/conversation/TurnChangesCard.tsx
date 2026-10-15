@@ -11,7 +11,8 @@ const COLLAPSED_FILES = 3;
 /**
  * The card under a finished turn: how many files it edited and the line
  * counts, then the files themselves. A file opens its diff in the preview
- * panel; "查看变更" opens the whole turn there.
+ * panel; "查看变更" opens the whole turn there. Files without a recorded diff
+ * and `bash` commands are marked: undo leaves them alone.
  */
 export const TurnChangesCard = memo(function TurnChangesCard({
 	turn,
@@ -25,6 +26,7 @@ export const TurnChangesCard = memo(function TurnChangesCard({
 	const [busy, setBusy] = useState(false);
 	const hidden = turn.files.length - COLLAPSED_FILES;
 	const files = expanded || hidden <= 0 ? turn.files : turn.files.slice(0, COLLAPSED_FILES);
+	const revertable = turn.files.some((file) => file.patches.length > 0);
 	const undo = async () => {
 		setBusy(true);
 		await revertTurn(turn.turnId);
@@ -44,7 +46,7 @@ export const TurnChangesCard = memo(function TurnChangesCard({
 					<button
 						type="button"
 						className="turn-changes-undo"
-						disabled={reverted || busy}
+						disabled={reverted || busy || !revertable}
 						onClick={() => void undo()}
 					>
 						{reverted ? t("turnReverted") : t("turnUndo")}
@@ -63,7 +65,7 @@ export const TurnChangesCard = memo(function TurnChangesCard({
 							<button
 								type="button"
 								className="turn-change-file"
-								title={file.path}
+								data-tooltip={file.path}
 								onClick={() => openTurnChanges(turn.turnId, file.path)}
 							>
 								<span className="turn-change-path">
@@ -72,12 +74,17 @@ export const TurnChangesCard = memo(function TurnChangesCard({
 									</span>
 									<span className="turn-change-name">{name}</span>
 								</span>
-								<DiffStat additions={file.additions} deletions={file.deletions} />
+								{file.untracked ? (
+									<span className="turn-change-untracked">{t("turnFileNotRevertable")}</span>
+								) : (
+									<DiffStat additions={file.additions} deletions={file.deletions} />
+								)}
 							</button>
 						</li>
 					);
 				})}
 			</ul>
+			{turn.bashCalls ? <p className="turn-changes-note">{t("turnBashNote", { count: turn.bashCalls })}</p> : null}
 			{hidden > 0 ? (
 				<button
 					type="button"

@@ -187,6 +187,7 @@ paths:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
         "202": { description: Prompt accepted }
+        "409": { description: A turn revert is writing files }
   /api/v1/sessions/{id}/steer:
     post:
       parameters:
@@ -274,9 +275,11 @@ paths:
     post:
       description: >-
         Reverse-apply the edit/write patches (tool result `details.patch`) of the turn that starts at
-        user entry `turnId`. All or nothing. Hunks may have moved (later edits elsewhere in the file) but their
-        lines must be unchanged. A `stepcode-web.turn-revert` custom message then tells the model which files
-        were restored and lists the turn in the snapshot's `revertedTurns`.
+        user entry `turnId`. All or nothing over the patched files. Hunks may have moved (later edits elsewhere
+        in the file) and their edge context may have changed, but the lines the turn changed must be intact.
+        Successful edit/write calls without a patch (large or binary files) are left as they are and listed in
+        `skipped`; changes made through `bash` are not tracked. A `stepcode-web.turn-revert` custom message then
+        tells the model which files were restored and lists the turn in the snapshot's `revertedTurns`.
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
         - { name: turnId, in: path, required: true, schema: { type: string } }
@@ -290,6 +293,14 @@ paths:
                 properties:
                   snapshot: { type: object }
                   paths: { type: array, items: { type: string } }
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, reason]
+                      properties:
+                        path: { type: string }
+                        reason: { type: string, enum: [too_large, binary, unreadable, unknown] }
         "409":
           description: The revert was refused and nothing was written.
           content:

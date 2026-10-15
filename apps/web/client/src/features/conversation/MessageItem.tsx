@@ -14,14 +14,7 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
  * One chat message (legacy `renderTimeline` message branch, app.js 2253-2261).
  * `data-content` and `data-entry-id` are kept from the legacy markup.
  */
-export const MessageItem = memo(function MessageItem({
-	item,
-	showActions = false,
-}: {
-	readonly item: MessageTimelineItem;
-	/** The action row goes under the last reply of a finished turn only. */
-	readonly showActions?: boolean;
-}) {
+export const MessageItem = memo(function MessageItem({ item }: { readonly item: MessageTimelineItem }) {
 	const t = useT();
 	const role = item.role === "user" ? "user" : "assistant";
 	const live = item.itemId === "message-live";
@@ -29,7 +22,9 @@ export const MessageItem = memo(function MessageItem({
 	const copyLabel = t("copy");
 	const bodyRef = useRef<HTMLDivElement>(null);
 	const skill = role === "user" ? skillInvocation(item.content) : null;
-	const content = useSmoothText(skill ? skill.request : item.content, live);
+	const text = useSmoothText(skill ? skill.request : item.content, live);
+	// A user message can be images only; it still opens a turn, so it gets a row.
+	const content = text || (role === "user" && item.images ? t("imageMessage", { count: item.images }) : text);
 	// Memoised: a streaming turn re-renders the timeline per frame, and parsing every earlier message each time made long sessions crawl.
 	const html = useMemo(
 		() => renderMarkdown(content, { code: codeLabel, copy: copyLabel }),
@@ -54,7 +49,7 @@ export const MessageItem = memo(function MessageItem({
 					onCopyCode={(code) => void copyText(code)}
 				/>
 			) : null}
-			{item.role === "assistant" && showActions ? <MessageActions item={item} /> : null}
+			{item.role === "assistant" ? <MessageActions item={item} /> : null}
 		</article>
 	);
 });
