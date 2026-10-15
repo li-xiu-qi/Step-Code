@@ -13,6 +13,7 @@
  * Modes use this class and add their own I/O layer on top.
  */
 
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import type {
@@ -358,6 +359,7 @@ export class AgentSession {
 	private _autoClmAbortController?: AbortController;
 	private _manualClm = false;
 	private _nativeThresholdBoundary?: string;
+	private _failedNativeThresholdPrefix?: string;
 
 	// Branch summarization state
 	private _branchSummaryAbortController: AbortController | undefined = undefined;
@@ -724,6 +726,34 @@ export class AgentSession {
 					(entry.type === "custom" && entry.customType === "step-live-context"),
 			);
 		return `${this.sessionId}:${this.model?.provider}/${this.model?.id}:${boundary?.id ?? "root"}:${digestMessages(this.agent.state.messages)}`;
+	}
+
+	/** Retained tail growth must not restart retries for the same failed summary. */
+	private _nativeCompactionPrefixKey(preparation: CompactionPreparation, model: Model<any>): string {
+		return createHash("sha256")
+			.update(
+				JSON.stringify({
+					session: this.sessionId,
+					model: [model.provider, model.id, model.api, model.baseUrl, model.contextWindow, model.maxTokens],
+					reasoning: [model.reasoning, model.thinkingLevelMap],
+					samplingParams: model.samplingParams,
+					compat: model.compat,
+					thinkingLevel: this.thinkingLevel,
+					retry: this.settingsManager.getRetrySettings(),
+					settings: preparation.settings,
+					messages: preparation.messagesToSummarize,
+					turnPrefix: preparation.turnPrefixMessages,
+					isSplitTurn: preparation.isSplitTurn,
+					previousSummary: preparation.previousSummary,
+					activeSkills: preparation.activeSkills,
+					fileOps: [
+						[...preparation.fileOps.read].sort(),
+						[...preparation.fileOps.written].sort(),
+						[...preparation.fileOps.edited].sort(),
+					],
+				}),
+			)
+			.digest("hex");
 	}
 
 	private _blocksNativeThreshold(): boolean {
@@ -2645,6 +2675,7 @@ export class AgentSession {
 			}
 			this._liveContext?.invalidate();
 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this._failedNativeThresholdPrefix = undefined;
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
@@ -2887,6 +2918,7 @@ export class AgentSession {
 		const settings = this.settingsManager.getCompactionSettings();
 		let started = false;
 		let fromExtension = false;
+		let thresholdPrefix: string | undefined;
 
 		try {
 			if (!this.model) {
@@ -2908,6 +2940,18 @@ export class AgentSession {
 			if (liveCompaction) preparation = liveCompaction.preparation;
 			if (!preparation) {
 				return false;
+			}
+
+			// Only suppress the default CLM fallback after its retry budget failed.
+			// Extensions, explicit compaction and mandatory overflow recovery retain
+			// their own retry/decision paths. A changed summary prefix may try again.
+			if (
+				reason === "threshold" &&
+				this._getLiveContext() &&
+				!this._extensionRunner.hasHandlers("session_before_compact")
+			) {
+				thresholdPrefix = this._nativeCompactionPrefixKey(preparation, requestModel);
+				if (thresholdPrefix === this._failedNativeThresholdPrefix) return false;
 			}
 
 			this._autoCompactionAbortController = new AbortController();
@@ -3007,6 +3051,7 @@ export class AgentSession {
 			}
 			this._liveContext?.invalidate();
 			this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+			this._failedNativeThresholdPrefix = undefined;
 			const newEntries = this.sessionManager.getEntries();
 			const sessionContext = this.sessionManager.buildSessionContext();
 			this.agent.state.messages = sessionContext.messages;
@@ -3057,6 +3102,7 @@ export class AgentSession {
 			const errorMessage = error instanceof Error ? error.message : "compaction failed";
 			if (started) {
 				const aborted = this._autoCompactionAbortController?.signal.aborted ?? false;
+				if (!aborted && thresholdPrefix) this._failedNativeThresholdPrefix = thresholdPrefix;
 				const formattedErrorMessage = aborted
 					? undefined
 					: reason === "overflow"
