@@ -49,16 +49,93 @@ paths:
   /api/v1/login:
     get:
       description: |
-        Where the model credential comes from. StepCode Web has no login screen:
-        signing in is a terminal action that writes auth.json, and this host reads
-        the same file. The response carries the source, provider and profile —
-        never the credential — plus the command that changes it.
+        Where the model credential comes from. Signing in writes auth.json, from
+        a terminal (`step login`) or from the sign-in dialog of Web and Desktop (the routes
+        below); this host reads the same file. The response carries the source,
+        provider and profile — never the credential — plus the command that
+        changes it.
       responses:
         "200":
           description: Credential source
           content:
             application/json:
               schema: { $ref: "#/components/schemas/LoginReport" }
+  /api/v1/login/methods:
+    get:
+      description: The four `step login` profiles, for the sign-in dialog.
+      responses:
+        "200":
+          description: Sign-in methods
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  methods:
+                    type: array
+                    items: { $ref: "#/components/schemas/LoginMethod" }
+  /api/v1/login/api-key:
+    post:
+      description: |
+        Validate a platform API key against its region (GET <base>/v1/models) and,
+        only when accepted, save it to auth.json in the same shape `step login`
+        writes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile, apiKey]
+              properties:
+                profile: { type: string, enum: [platform_cn, platform_oversea] }
+                apiKey: { type: string }
+      responses:
+        "200":
+          description: Saved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  login: { $ref: "#/components/schemas/LoginReport" }
+        "400": { description: "Bad input, or `code: invalid_key` when the provider rejected the key" }
+        "502": { description: "`code: unavailable`: the provider could not be reached; nothing was saved" }
+  /api/v1/login/browser:
+    get:
+      description: State of the Step Plan browser sign-in.
+      responses:
+        "200":
+          description: Browser sign-in state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserLoginState" }
+    post:
+      description: |
+        Start the Step Plan browser sign-in (the same cloud flow as `step login`)
+        and answer with the authorize URL to open. Approval is awaited in the
+        background; poll GET until `completed` or `failed`. Starting again
+        cancels the previous attempt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [profile]
+              properties:
+                profile: { type: string, enum: [step_plan, step_plan_oversea] }
+      responses:
+        "200":
+          description: Pending, with authUrl
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrowserLoginState" }
+        "502": { description: "The sign-in could not be started (`code: failed`)" }
+    delete:
+      description: Cancel the pending browser sign-in; a later approval is ignored.
+      responses:
+        "200": { description: Cancelled }
   /api/v1/workspaces:
     get:
       responses:
@@ -416,6 +493,22 @@ components:
                     label: { type: string }
                     value: { type: string }
                     description: { type: string }
+    LoginMethod:
+      type: object
+      required: [id, credentialSource, region, keyPageUrl]
+      properties:
+        id: { type: string, enum: [step_plan, step_plan_oversea, platform_cn, platform_oversea] }
+        credentialSource: { type: string, enum: [browser, apiKey] }
+        region: { type: string, enum: [cn, global] }
+        keyPageUrl: { type: string, description: Where to create a platform API key }
+    BrowserLoginState:
+      type: object
+      required: [state]
+      properties:
+        state: { type: string, enum: [idle, pending, completed, failed] }
+        profile: { type: string }
+        authUrl: { type: string, description: Authorize URL to open while pending }
+        error: { type: string }
     LoginReport:
       description: |
         Where the model credential comes from. Never contains the credential.

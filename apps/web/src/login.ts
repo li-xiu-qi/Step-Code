@@ -1,14 +1,21 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { StepLoginStatus } from "@step-harness/coding-agent";
+import {
+	loginStepInBrowser,
+	loginStepWithApiKey,
+	resolveStepLoginProfiles,
+	type StepApiKeyValidation,
+	type StepLoginProfileId,
+	type StepLoginStatus,
+} from "@step-harness/coding-agent";
 
 /**
  * What the browser is allowed to know about the model credential.
  *
- * StepCode Web has no login screen: signing in is a terminal action
- * (`step login`) that writes `auth.json`, and the host reuses it. The UI still
- * has to explain where its credential comes from when a request fails, so this
- * reports the source and the shape — never the secret itself. There is no field
- * here that can carry a token.
+ * Signing in writes `auth.json`, either from a terminal (`step login`) or from
+ * the sign-in dialog (`WebLoginController` below); both write the same
+ * file and the host reuses it. The UI has to explain where its credential comes
+ * from, so this reports the source and the shape — never the secret itself.
+ * There is no field here that can carry a token.
  */
 export interface LoginReport {
 	/** Environment variable that supplies the credential, when one does. */
@@ -99,4 +106,150 @@ export function buildLoginReport(input: LoginReportInput): LoginReport {
 		...(configured ? { validity: input.status.validity } : {}),
 		loginCommand: "step login",
 	};
+}
+
+/** A sign-in method the desktop dialog offers: one of the four `step login` profiles. */
+export interface LoginMethod {
+	readonly id: StepLoginProfileId;
+	/** `browser`: Step Plan sign-in in the system browser; `apiKey`: paste a platform key. */
+	readonly credentialSource: "browser" | "apiKey";
+	/** `cn` for the mainland platform, `global` for the international one. */
+	readonly region: "cn" | "global";
+	/** Where the user creates a platform API key for this region. */
+	readonly keyPageUrl: string;
+}
+
+export function loginMethods(env: Record<string, string | undefined> = process.env): LoginMethod[] {
+	return resolveStepLoginProfiles(env).map((profile) => ({
+		id: profile.id,
+		credentialSource: profile.credentialSource,
+		region: profile.id.endsWith("_oversea") ? "global" : "cn",
+		keyPageUrl: profile.keyPageUrl,
+	}));
+}
+
+/** State of the browser sign-in, as `GET /api/v1/login/browser` reports it. */
+export interface BrowserLoginState {
+	readonly state: "idle" | "pending" | "completed" | "failed";
+	readonly profile?: StepLoginProfileId;
+	/** The authorize URL to open; present while pending. */
+	readonly authUrl?: string;
+	readonly error?: string;
+}
+
+export type ApiKeyLoginResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly code: "invalid_key" | "unavailable"; readonly error: string };
+
+export interface WebLoginControllerOptions {
+	readonly authPath: () => string;
+	/** Called after a credential was written, so cached reports are dropped. */
+	readonly onSaved: () => void;
+	readonly env?: Record<string, string | undefined>;
+	/** Overridable so tests do not reach the network. */
+	readonly loginWithApiKey?: typeof loginStepWithApiKey;
+	readonly loginInBrowser?: typeof loginStepInBrowser;
+}
+
+/**
+ * The page sign-in, run by the host because only it can write `auth.json`.
+ *
+ * The kernel does the work (`loginStepWithApiKey`, `loginStepInBrowser`) and
+ * writes the credential exactly as `step login` would; this class only keeps
+ * the one browser sign-in that may be in flight, so the page can poll it and
+ * cancel it when the user goes back.
+ */
+export class WebLoginController {
+	private readonly options: WebLoginControllerOptions;
+	private browser: { controller: AbortController; state: BrowserLoginState } | undefined;
+
+	constructor(options: WebLoginControllerOptions) {
+		this.options = options;
+	}
+
+	private method(id: unknown, source: LoginMethod["credentialSource"]): LoginMethod | undefined {
+		return loginMethods(this.options.env).find((method) => method.id === id && method.credentialSource === source);
+	}
+
+	isApiKeyMethod(id: unknown): id is StepLoginProfileId {
+		return this.method(id, "apiKey") !== undefined;
+	}
+
+	isBrowserMethod(id: unknown): id is StepLoginProfileId {
+		return this.method(id, "browser") !== undefined;
+	}
+
+	/** Validate the key against its region and save it only when the provider accepts it. */
+	async withApiKey(profile: StepLoginProfileId, apiKey: string): Promise<ApiKeyLoginResult> {
+		const login = this.options.loginWithApiKey ?? loginStepWithApiKey;
+		const result: StepApiKeyValidation = await login({
+			authPath: this.options.authPath(),
+			profile,
+			apiKey,
+			...(this.options.env ? { env: this.options.env } : {}),
+		});
+		if (result.validity === "valid") {
+			this.cancelBrowser();
+			this.options.onSaved();
+			return { ok: true };
+		}
+		return result.validity === "invalid"
+			? { ok: false, code: "invalid_key", error: "The API key was rejected" }
+			: { ok: false, code: "unavailable", error: result.error ?? "The provider could not be reached" };
+	}
+
+	/**
+	 * Start the Step Plan browser sign-in and resolve with the authorize URL.
+	 * The approval is awaited in the background; poll `browserState()`.
+	 */
+	startBrowser(profile: StepLoginProfileId): Promise<BrowserLoginState> {
+		this.cancelBrowser();
+		const controller = new AbortController();
+		const entry: { controller: AbortController; state: BrowserLoginState } = {
+			controller,
+			state: { state: "pending", profile },
+		};
+		this.browser = entry;
+		const login = this.options.loginInBrowser ?? loginStepInBrowser;
+		return new Promise((resolve) => {
+			login({
+				authPath: this.options.authPath(),
+				profile,
+				signal: controller.signal,
+				...(this.options.env ? { env: this.options.env } : {}),
+				onAuthUrl: (authUrl) => {
+					entry.state = { state: "pending", profile, authUrl };
+					resolve(entry.state);
+				},
+			}).then(
+				() => {
+					if (controller.signal.aborted) return;
+					entry.state = { state: "completed", profile };
+					this.options.onSaved();
+					resolve(entry.state);
+				},
+				(caught: unknown) => {
+					// A cancelled sign-in is the user going back, not a failure to show.
+					if (controller.signal.aborted) return resolve({ state: "idle" });
+					entry.state = {
+						state: "failed",
+						profile,
+						error: caught instanceof Error ? caught.message : String(caught),
+					};
+					resolve(entry.state);
+				},
+			);
+		});
+	}
+
+	browserState(): BrowserLoginState {
+		return this.browser?.state ?? { state: "idle" };
+	}
+
+	/** Stop waiting for the browser approval; a later approval is then ignored. */
+	cancelBrowser(): void {
+		if (!this.browser) return;
+		this.browser.controller.abort();
+		this.browser = undefined;
+	}
 }

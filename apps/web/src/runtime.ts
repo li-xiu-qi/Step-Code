@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -235,6 +236,7 @@ export class WebSession {
 	private runtime!: AgentSessionRuntime;
 	private session!: AgentSession;
 	private status: WebSessionStatus = "idle";
+	private readonly closeListeners = new Set<() => void>();
 	private unread = false;
 	private unsubscribeSession?: () => void;
 	private unsubscribeRuntimeSessionChange?: () => void;
@@ -489,6 +491,17 @@ export class WebSession {
 	subscribe(listener: (event: WebEvent) => void): () => void {
 		this.listeners.add(listener);
 		return () => this.listeners.delete(listener);
+	}
+
+	/** Called once when the session is closed; an SSE stream ends so the page reconnects. */
+	onClose(listener: () => void): () => void {
+		this.closeListeners.add(listener);
+		return () => this.closeListeners.delete(listener);
+	}
+
+	/** A turn is running or waiting on the user; closing now would cut it off. */
+	isBusy(): boolean {
+		return this.status === "running" || this.status === "waiting";
 	}
 
 	/**
@@ -765,6 +778,9 @@ export class WebSession {
 		this.releaseWriterLease = undefined;
 		this.writerLeasePath = undefined;
 		this.listeners.clear();
+		const closed = [...this.closeListeners];
+		this.closeListeners.clear();
+		for (const listener of closed) listener();
 	}
 }
 
@@ -819,10 +835,31 @@ class WebSessionMetadataStore {
 	}
 }
 
+/**
+ * Forget every idle session in `sessions` and close it.
+ *
+ * Removal is synchronous, before any close settles, so a request that arrives
+ * right after a sign-in already reopens the session instead of getting the old
+ * object. Busy sessions are kept: closing would cut off a turn. Returns the
+ * released sessions and the settled closes.
+ */
+export function releaseIdleSessions<T extends Pick<WebSession, "isBusy" | "close">>(
+	sessions: Map<string, T>,
+): { released: Array<[string, T]>; closed: Promise<PromiseSettledResult<void>[]> } {
+	const released = [...sessions].filter(([, session]) => !session.isBusy());
+	for (const [id] of released) sessions.delete(id);
+	return { released, closed: Promise.allSettled(released.map(([, session]) => session.close())) };
+}
+
 export class WebSessionStore {
 	private readonly sessions = new Map<string, WebSession>();
 	private readonly openings = new Map<string, Promise<WebSession>>();
 	private readonly metadata = new WebSessionMetadataStore(resolveStepAgentDir());
+	/**
+	 * Sessions released by `reloadCredentials` before their first message: no
+	 * file exists to reopen them from, so they are recreated with the same id.
+	 */
+	private readonly unsaved = new Map<string, string>();
 
 	async create(cwd: string): Promise<WebSession> {
 		await this.metadata.load();
@@ -839,6 +876,13 @@ export class WebSessionStore {
 		if (opening) return opening;
 		const pending = (async () => {
 			const info = (await this.list()).find((candidate) => candidate.id === id);
+			const unsavedCwd = this.unsaved.get(id);
+			if (!info && unsavedCwd !== undefined) {
+				this.unsaved.delete(id);
+				const recreated = await WebSession.create({ cwd: unsavedCwd, sessionId: id });
+				this.sessions.set(recreated.id, recreated);
+				return recreated;
+			}
 			if (!info) throw new Error(`Session not found: ${id}`);
 			const opened = await WebSession.create({
 				cwd: info.cwdAvailable ? info.cwd : defaultWorkspace(),
@@ -911,6 +955,27 @@ export class WebSessionStore {
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			}
+		}
+	}
+
+	/**
+	 * Rebuild open sessions after a sign-in.
+	 *
+	 * Each session fixes its model catalog and provider endpoint when it is
+	 * created, so one opened before the credential existed stays on the
+	 * `unknown` model ("No API key found for the selected model") even after
+	 * `auth.json` is written. Dropping it makes the next request reopen it from
+	 * its file with the new credential; its event streams end, and the page's
+	 * EventSource reconnects to the rebuilt session.
+	 */
+	async reloadCredentials(): Promise<void> {
+		const { released, closed } = releaseIdleSessions(this.sessions);
+		for (const [id, session] of released) {
+			const file = session.sessionFile();
+			if (!file || !existsSync(file)) this.unsaved.set(id, session.cwd);
+		}
+		for (const result of await closed) {
+			if (result.status === "rejected") console.error("Could not close a session after sign-in:", result.reason);
 		}
 	}
 

@@ -615,19 +615,24 @@ export { prepareStepInstallation } from "./step/installation.ts";
 export { maybeUpdateStep, runStepUpdateCommand } from "./step/local-update.ts";
 export {
 	isStepInteractiveLoginStartup,
+	loginStepInBrowser,
+	loginStepWithApiKey,
 	needsStepLoginBeforeInteractive,
 	readStepLoginCredential,
 	readStepLoginProfile,
 	runStepLogin,
+	type StepHeadlessLoginOptions,
 	type StepLoginHost,
 	type StepLoginOutcome,
 	syncStepLoginProfileEndpoint,
 } from "./step/login-flow.ts";
 export {
 	getStepLoginStatus,
+	type StepApiKeyValidation,
 	type StepCredentialValidity,
 	type StepLoginMethod,
 	type StepLoginStatus,
+	validateStepApiKey,
 } from "./step/login-status.ts";
 export {
 	ambiguousPluginServerNames,
@@ -637,7 +642,7 @@ export {
 } from "./step/mcp.ts";
 export { describeStepMcpImportOutcome, runStepMcpImportPrompt } from "./step/mcp-import-prompt.ts";
 export { hasStoredMcpOAuthCredential, loginMcpServer, logoutMcpServer } from "./step/mcp-oauth.ts";
-export { resolveStepLoginProfiles } from "./step/onboarding.ts";
+export { resolveStepLoginProfiles, type StepLoginProfile, type StepLoginProfileId } from "./step/onboarding.ts";
 export {
 	AUTO_RESUME_PROMPT,
 	decideStepToolCall,

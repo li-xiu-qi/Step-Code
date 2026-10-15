@@ -13,6 +13,7 @@ import { api, apiSend, errorMessage, setUnauthorizedHandler } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { basename, clipDetail, compact, toolInputDetail, toolInputSummary } from "../lib/format";
 import { contentText, skillInvocation } from "../lib/markdown";
+import { isDesktopHost } from "../platform/host";
 import { type AppState, getState, mapWith, setState, setUi } from "./store";
 import type {
 	AgentMessage,
@@ -21,6 +22,7 @@ import type {
 	ClarificationRequest,
 	ContentPart,
 	FileChange,
+	LoginReport,
 	SessionEntry,
 	SessionSnapshot,
 	SessionStatus,
@@ -132,7 +134,10 @@ export function mergeSessionSummary(
  */
 function fileChange(name: string, args: unknown, result: AgentMessage | undefined): FileChange | undefined {
 	if ((name !== "edit" && name !== "write") || !result || result.isError) return undefined;
-	const details = (result.details ?? {}) as { patch?: unknown; untracked?: unknown };
+	const details = (result.details ?? {}) as {
+		patch?: unknown;
+		untracked?: unknown;
+	};
 	const input = (args ?? {}) as { path?: unknown; file_path?: unknown };
 	const path = typeof input.path === "string" ? input.path : input.file_path;
 	if (typeof path !== "string" || !path.trim()) return undefined;
@@ -228,7 +233,11 @@ function approvalItems(snapshot: SessionSnapshot): TimelineItem[] {
 	for (const approval of liveApprovals.values()) {
 		if (approval.sessionId === snapshot.id && !pending.has(approval.id)) pending.set(approval.id, approval);
 	}
-	return [...pending.values()].map((approval) => ({ itemId: `approval-${approval.id}`, kind: "approval", approval }));
+	return [...pending.values()].map((approval) => ({
+		itemId: `approval-${approval.id}`,
+		kind: "approval",
+		approval,
+	}));
 }
 
 /**
@@ -454,7 +463,10 @@ export function connectStream(id: string): void {
 		handleAgentEvent(JSON.parse((event as MessageEvent).data).event as AgentStreamEvent);
 	});
 	source.addEventListener("status", (event) => {
-		const payload = JSON.parse((event as MessageEvent).data) as { status: SessionStatus; unread: boolean };
+		const payload = JSON.parse((event as MessageEvent).data) as {
+			status: SessionStatus;
+			unread: boolean;
+		};
 		if (payload.status !== "waiting") liveApprovals.clear();
 		setState((state) => ({
 			// Only a running turn can still record the pending message.
@@ -643,6 +655,20 @@ export interface BootstrapOptions {
 }
 
 let bootstrapped = false;
+let resumeAfterLogin: (() => void) | undefined;
+
+/**
+ * Close the Desktop sign-in gate with the fresh credential report and let a
+ * paused bootstrap continue. Sessions are opened only after this, so none is
+ * built while `auth.json` is still empty.
+ */
+export function completeLogin(login: LoginReport): void {
+	setState({ login });
+	setUi({ loginRequired: false });
+	const resume = resumeAfterLogin;
+	resumeAfterLogin = undefined;
+	resume?.();
+}
 
 /**
  * Sign in, load workspaces and sessions, then open the most relevant session
@@ -662,6 +688,14 @@ export async function bootstrap(options: BootstrapOptions = {}): Promise<void> {
 			login: boot.login ?? null,
 			draftCwd: boot.cwd,
 		});
+		// Desktop asks for a credential before anything else; a browser host
+		// keeps the terminal `step login` path and its banner.
+		if (isDesktopHost() && boot.login && !boot.login.configured) {
+			await new Promise<void>((resolve) => {
+				resumeAfterLogin = resolve;
+				setUi({ loginRequired: true });
+			});
+		}
 		await refreshWorkspaces();
 		await refreshSessions();
 		const sessions = getState().sessions;

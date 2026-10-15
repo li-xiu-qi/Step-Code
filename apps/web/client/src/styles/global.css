@@ -447,3 +447,10 @@ select {
   .sidebar-show {
   left: 84px;
 }
+/* The sign-in gate covers the title strip: its backdrop drags the window, the card does not. */
+[data-host="desktop"] .login-gate {
+  -webkit-app-region: drag;
+}
+[data-host="desktop"] .login-card {
+  -webkit-app-region: no-drag;
+}

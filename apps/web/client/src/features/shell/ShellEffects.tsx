@@ -37,6 +37,8 @@ function handleEscape(): void {
 }
 
 function handleKeydown(event: KeyboardEvent): void {
+	// The sign-in gate cannot be dismissed, and nothing behind it may act.
+	if (getState().ui.loginRequired) return;
 	const mod = event.metaKey || event.ctrlKey;
 	// Autofill and some IMEs dispatch keydown without a `key`.
 	const key = typeof event.key === "string" ? event.key.toLowerCase() : "";

@@ -211,6 +211,22 @@ export interface LoginReport {
 	readonly loginCommand: string;
 }
 
+/** One of the four `step login` profiles (src/login.ts `LoginMethod`). */
+export interface LoginMethod {
+	readonly id: "step_plan" | "step_plan_oversea" | "platform_cn" | "platform_oversea";
+	readonly credentialSource: "browser" | "apiKey";
+	readonly region: "cn" | "global";
+	readonly keyPageUrl: string;
+}
+
+/** `GET /api/v1/login/browser` (src/login.ts `BrowserLoginState`). */
+export interface BrowserLoginState {
+	readonly state: "idle" | "pending" | "completed" | "failed";
+	readonly profile?: string;
+	readonly authUrl?: string;
+	readonly error?: string;
+}
+
 export interface BootstrapPayload {
 	readonly cwd: string;
 	readonly directoryPicker?: string;

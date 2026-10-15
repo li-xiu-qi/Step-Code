@@ -2,6 +2,7 @@ import type { CSSProperties } from "react";
 import { Composer } from "./features/composer";
 import { ConversationStream, FeedbackModal, TaskBanner } from "./features/conversation";
 import { FileTreePanel, PreviewPanel, PreviewShowButton } from "./features/files";
+import { LoginGate } from "./features/login";
 import { CronView, MarketView } from "./features/market";
 import { AuthBanner, ErrorToast, LoggedOutOverlay, ShellEffects, SidebarShowButton, UserArea } from "./features/shell";
 import { SearchModal, SessionMenu, SidebarNav, SidebarResizer, TagPicker } from "./features/sidebar";
@@ -24,6 +25,7 @@ import { IconSprite } from "./ui";
  *                        | shell toast + auth banner
  *     aside#previewPanel files
  *   #tagPicker, #feedbackModal, #searchModal, #workspaceBrowserModal, #removeWorkspaceModal, #loggedOutOverlay
+ *   #loginGate         login: Desktop sign-in, above everything while no credential exists
  */
 export function App() {
 	const layout = useAppStore(
@@ -79,6 +81,7 @@ export function App() {
 			<WorkspaceBrowserModal />
 			<RemoveWorkspaceModal />
 			<LoggedOutOverlay />
+			<LoginGate />
 			<ShellEffects />
 		</I18nProvider>
 	);
