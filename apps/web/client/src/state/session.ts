@@ -96,7 +96,10 @@ export function knownWorkspaces(state: AppState): string[] {
 	for (const session of state.sessions) {
 		if (session.cwd && session.cwdAvailable !== false) values.add(session.cwd);
 	}
-	return [...values].sort((left, right) => basename(left).localeCompare(basename(right), "zh-CN"));
+	const hidden = new Set(state.workspaces.filter((workspace) => workspace.hidden).map((workspace) => workspace.path));
+	return [...values]
+		.filter((path) => !hidden.has(path))
+		.sort((left, right) => basename(left).localeCompare(basename(right), "zh-CN"));
 }
 
 /** The cwd new work should target: current session, else draft, else launch folder. */

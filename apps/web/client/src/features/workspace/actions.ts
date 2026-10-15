@@ -5,7 +5,6 @@
 
 import { t } from "../../i18n";
 import { api, apiSend, errorMessage } from "../../lib/api";
-import { basename } from "../../lib/format";
 import { getDesktopBridge } from "../../platform/host";
 import { refreshWorkspaces, showError, startDraft } from "../../state/session";
 import { getState, setState, setUi, setWithout } from "../../state/store";
@@ -26,15 +25,29 @@ export async function addWorkspace(path: string): Promise<void> {
 	}
 }
 
-/** Unregister a workspace after confirmation; files are untouched (legacy `removeWorkspace`, 2040-2053). */
-export async function removeWorkspace(path: string): Promise<void> {
-	if (!window.confirm(t("confirmRemoveWorkspace", { name: basename(path) }))) return;
+export function requestWorkspaceRemoval(path: string): void {
+	if (getState().ui.workspaceRemoval?.pending) return;
+	setUi({ workspaceRemoval: { path, pending: false } });
+}
+
+export function closeWorkspaceRemoval(): void {
+	if (!getState().ui.workspaceRemoval?.pending) setUi({ workspaceRemoval: null });
+}
+
+/** Confirmed navigation removal; never deletes files or sessions. */
+export async function removeWorkspace(): Promise<void> {
+	const removal = getState().ui.workspaceRemoval;
+	if (!removal || removal.pending) return;
+	const { path } = removal;
+	setUi({ workspaceRemoval: { path, pending: true } });
 	try {
 		await api(`/api/v1/workspaces?${new URLSearchParams({ path })}`, { method: "DELETE" });
 		const state = getState();
 		if (!state.current && state.draftCwd === path) setState({ draftCwd: state.bootstrapCwd });
 		await refreshWorkspaces();
+		setUi({ workspaceRemoval: null });
 	} catch (error) {
+		setUi({ workspaceRemoval: { path, pending: false } });
 		showError(errorMessage(error));
 	}
 }

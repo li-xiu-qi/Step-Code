@@ -130,6 +130,9 @@ apps/web/
   and add a unit test.
 - Anything a reloaded page must show again belongs in the session snapshot (e.g. `pendingApprovals`), not only in
   an SSE event.
+- Workspace navigation metadata is separate from sessions: `web-workspaces.json` stores registered `workspaces`
+  and explicit `removedWorkspaces`. Removed entries are returned with `hidden: true`; clients must not recreate
+  their project groups from session cwd values. Re-adding restores the group; removal never deletes chats or files.
 - Environment variables: `STEPCODE_WEB_PORT` (default 3077), `STEPCODE_WEB_CWD` (default workspace),
   `STEPCODE_WEB_PUBLIC_DIR` (client directory), `STEPCODE_WEB_AUTH_SECRET`. Document new ones here and in
   `apps/desktop/README.md` if the desktop passes them through.

@@ -26,12 +26,14 @@
 	margin-left: auto;
 	opacity: 0;
 }
-.project-header:hover .project-actions {
+.project-header:hover .project-actions,
+.project-header:focus-within .project-actions {
 	opacity: 1;
 }
 .project-action {
 	width: var(--control-h);
 	height: var(--control-h);
+	flex-shrink: 0;
 }
 .project-sessions {
 	display: grid;

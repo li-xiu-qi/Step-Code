@@ -62,7 +62,7 @@ paths:
   /api/v1/workspaces:
     get:
       responses:
-        "200": { description: "Registered workspaces: path, name, available" }
+        "200": { description: "Workspace navigation entries: path, name, available, optional hidden=true for explicitly removed folders. Hidden entries persist across reload; chats remain searchable and appear under Recent. Adding the folder clears hidden." }
     post:
       requestBody:
         required: true
@@ -80,8 +80,8 @@ paths:
       parameters:
         - { name: path, in: query, required: true, schema: { type: string } }
       responses:
-        "200": { description: Workspace unregistered; files and sessions untouched }
-        "404": { description: Workspace is not registered }
+        "200": { description: Workspace hidden persistently, including session-derived folders; idempotent for retries. Files and sessions untouched. }
+        "404": { description: Path is missing or not absolute }
   /api/v1/workspaces/pick:
     post:
       description: |

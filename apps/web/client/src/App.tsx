@@ -5,7 +5,7 @@ import { FileTreePanel, PreviewPanel, PreviewShowButton } from "./features/files
 import { CronView, MarketView } from "./features/market";
 import { AuthBanner, ErrorToast, LoggedOutOverlay, ShellEffects, SidebarShowButton, UserArea } from "./features/shell";
 import { SearchModal, SessionMenu, SidebarNav, SidebarResizer, TagPicker } from "./features/sidebar";
-import { WorkspaceBrowserModal, WorkspaceControl } from "./features/workspace";
+import { RemoveWorkspaceModal, WorkspaceBrowserModal, WorkspaceControl } from "./features/workspace";
 import { I18nProvider } from "./i18n";
 import { cx } from "./lib/format";
 import { shallowEqual, useAppStore } from "./state/store";
@@ -23,7 +23,7 @@ import { IconSprite } from "./ui";
  *                        | .composer-zone > composer form (+ workspace control) | sidebar session menu
  *                        | shell toast + auth banner
  *     aside#previewPanel files
- *   #tagPicker, #feedbackModal, #searchModal, #workspaceBrowserModal, #loggedOutOverlay
+ *   #tagPicker, #feedbackModal, #searchModal, #workspaceBrowserModal, #removeWorkspaceModal, #loggedOutOverlay
  */
 export function App() {
 	const layout = useAppStore(
@@ -77,6 +77,7 @@ export function App() {
 			<FeedbackModal />
 			<SearchModal />
 			<WorkspaceBrowserModal />
+			<RemoveWorkspaceModal />
 			<LoggedOutOverlay />
 			<ShellEffects />
 		</I18nProvider>

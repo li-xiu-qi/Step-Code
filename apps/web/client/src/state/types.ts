@@ -197,6 +197,8 @@ export interface WebWorkspace {
 	readonly name: string;
 	/** False when the directory has since been moved or deleted. */
 	readonly available: boolean;
+	/** Removed from workspace navigation without deleting sessions. */
+	readonly hidden?: boolean;
 }
 
 export interface LoginReport {
