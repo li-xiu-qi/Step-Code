@@ -499,3 +499,34 @@
 .turn-changes-more.open .icon {
 	transform: rotate(180deg);
 }
+
+/* A failed model request (MessageItem `MessageError`). */
+.message-error {
+	gap: 4px;
+	padding: 10px 14px;
+	border: 1px solid color-mix(in srgb, var(--danger) 30%, var(--line));
+	border-radius: var(--radius-surface);
+	background: var(--danger-surface);
+	font-size: 13px;
+	line-height: 1.6;
+}
+.message-error-title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	color: var(--danger);
+	font-weight: 600;
+}
+.message-error-status {
+	padding: 0 6px;
+	border-radius: var(--radius-chip);
+	background: color-mix(in srgb, var(--danger) 14%, transparent);
+	font: 11px / 18px var(--mono);
+}
+.message-error-text {
+	color: var(--ink-2);
+	overflow-wrap: anywhere;
+}
+.message-error-text a {
+	color: var(--accent);
+}

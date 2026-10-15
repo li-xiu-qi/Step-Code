@@ -31,6 +31,7 @@ export const MessageItem = memo(function MessageItem({ item }: { readonly item: 
 		[content, codeLabel, copyLabel],
 	);
 	useFadeIn(bodyRef, html, live);
+	if (item.error) return <MessageError entryId={item.entryId} error={item.error} />;
 	// The live turn before its first text (reasoning, or waiting on the first token).
 	if (role === "assistant" && !content) return <ThinkingIndicator />;
 	return (
@@ -53,6 +54,46 @@ export const MessageItem = memo(function MessageItem({ item }: { readonly item: 
 		</article>
 	);
 });
+
+/** `403: {"message": "..."}` -> the status and the provider's message; anything else unchanged. */
+function errorDetail(error: string): { readonly status: string; readonly message: string } {
+	const match = /^(\d{3}):\s*(\{[\s\S]*\})\s*$/.exec(error);
+	if (!match) return { status: "", message: error };
+	try {
+		const body = JSON.parse(match[2]) as { message?: unknown; error?: { message?: unknown } };
+		const message = body.message ?? body.error?.message;
+		return { status: match[1], message: typeof message === "string" ? message : error };
+	} catch {
+		return { status: "", message: error };
+	}
+}
+
+/** A failed model request: the provider's message, with any URL in it as a link (e.g. account verification). */
+function MessageError({ entryId, error }: { readonly entryId?: string; readonly error: string }) {
+	const t = useT();
+	const detail = errorDetail(error);
+	const parts = detail.message.split(/(https?:\/\/[^\s"'<>)]*[^\s"'<>),.;:!?])/g);
+	return (
+		<article className="message assistant message-error" role="alert" data-entry-id={entryId}>
+			<div className="message-error-title">
+				{t("modelRequestFailed")}
+				{detail.status ? <span className="message-error-status">{detail.status}</span> : null}
+			</div>
+			<p className="message-error-text">
+				{parts.map((part, index) =>
+					index % 2 ? (
+						// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed string.
+						<a key={index} href={part} target="_blank" rel="noreferrer">
+							{part}
+						</a>
+					) : (
+						part
+					),
+				)}
+			</p>
+		</article>
+	);
+}
 
 /**
  * The row under an assistant turn: copy, vote, fork, then what the turn cost and

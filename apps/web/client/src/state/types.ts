@@ -147,6 +147,8 @@ export interface MessageTimelineItem {
 	readonly images?: number;
 	readonly usage?: Usage;
 	readonly timestamp?: string;
+	/** The model request failed (assistant `stopReason: "error"`); the provider's message. */
+	readonly error?: string;
 }
 
 export type ToolState = "pending" | "completed" | "failed";

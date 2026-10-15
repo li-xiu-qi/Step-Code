@@ -163,8 +163,13 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		if (message.role === "toolResult") continue;
 		const text = contentText(message.content);
 		const images = message.role === "user" ? imageCount(message.content) : 0;
+		// A failed request leaves an assistant message with no content; without a row the error was invisible.
+		const error =
+			message.role === "assistant" && message.stopReason === "error"
+				? String(message.errorMessage || t("modelRequestFailed"))
+				: "";
 		// Every user message opens a turn (the host's turn boundary), even one without text.
-		if (text || message.role === "user") {
+		if (text || error || message.role === "user") {
 			items.push({
 				itemId: `message-${entry.id}`,
 				entryId: entry.id,
@@ -172,6 +177,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 				role: message.role,
 				content: text,
 				...(images ? { images } : {}),
+				...(error ? { error } : {}),
 				usage: entry.usage,
 				timestamp: entry.timestamp,
 			});
