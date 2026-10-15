@@ -15,10 +15,12 @@ import { basename, clipDetail, compact, toolInputDetail, toolInputSummary } from
 import { contentText } from "../lib/markdown";
 import { type AppState, getState, mapWith, setState, setUi } from "./store";
 import type {
+	AgentMessage,
 	ApprovalRequest,
 	BootstrapPayload,
 	ClarificationRequest,
 	ContentPart,
+	FileChange,
 	SessionEntry,
 	SessionSnapshot,
 	SessionStatus,
@@ -119,6 +121,31 @@ export function mergeSessionSummary(
 	return next;
 }
 
+/**
+ * The file change of a finished edit/write call: both tools record a unified
+ * patch in their result details; `write` says why when it recorded none.
+ */
+function fileChange(name: string, args: unknown, result: AgentMessage | undefined): FileChange | undefined {
+	if ((name !== "edit" && name !== "write") || !result || result.isError) return undefined;
+	const details = (result.details ?? {}) as { patch?: unknown; untracked?: unknown };
+	const input = (args ?? {}) as { path?: unknown; file_path?: unknown };
+	const path = typeof input.path === "string" ? input.path : input.file_path;
+	if (typeof path !== "string" || !path.trim()) return undefined;
+	if (typeof details.patch === "string") return { path, patch: details.patch };
+	const reason = details.untracked;
+	return {
+		path,
+		untracked: reason === "too_large" || reason === "binary" || reason === "unreadable" ? reason : "unknown",
+	};
+}
+
+/** Image parts of a message's content. */
+function imageCount(content: unknown): number {
+	return Array.isArray(content)
+		? (content as readonly ContentPart[]).filter((part) => part?.type === "image").length
+		: 0;
+}
+
 /** Project session entries into timeline rows (legacy `timelineFromEntries`, 2055-2096). */
 export function timelineFromEntries(entries: readonly SessionEntry[] = []): TimelineItem[] {
 	const items: TimelineItem[] = [];
@@ -133,13 +160,16 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		const message = entry.message;
 		if (message.role === "toolResult") continue;
 		const text = contentText(message.content);
-		if (text) {
+		const images = message.role === "user" ? imageCount(message.content) : 0;
+		// Every user message opens a turn (the host's turn boundary), even one without text.
+		if (text || message.role === "user") {
 			items.push({
 				itemId: `message-${entry.id}`,
 				entryId: entry.id,
 				kind: "message",
 				role: message.role,
 				content: text,
+				...(images ? { images } : {}),
 				usage: entry.usage,
 				timestamp: entry.timestamp,
 			});
@@ -147,6 +177,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const block of (message.content as readonly ContentPart[]).filter((part) => part?.type === "toolCall")) {
 				const result = toolResults.get(String(block.id));
+				const change = fileChange(String(block.name ?? ""), block.arguments, result);
 				items.push({
 					itemId: `tool-${block.id}`,
 					kind: "tool",
@@ -156,6 +187,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 					outputSummary: result ? compact(contentText(result.content)) : "",
 					inputDetail: toolInputDetail(block.arguments),
 					outputDetail: result ? clipDetail(contentText(result.content)) : "",
+					...(change ? { change } : {}),
 				});
 			}
 		}
@@ -345,11 +377,16 @@ function handleAgentEvent(agentEvent: AgentStreamEvent): void {
 		// The prompt entered the loop: show it in place now; the refresh after
 		// its message_end replaces this row with the recorded entry.
 		const content = contentText(agentEvent.message.content);
+		const images = imageCount(agentEvent.message.content);
 		setState((state) => ({
 			pendingTurn: null,
-			timelineItems: content
-				? upsertItem(state.timelineItems, { itemId: "message-user-live", kind: "message", role: "user", content })
-				: state.timelineItems,
+			timelineItems: upsertItem(state.timelineItems, {
+				itemId: "message-user-live",
+				kind: "message",
+				role: "user",
+				content,
+				...(images ? { images } : {}),
+			}),
 		}));
 	}
 	if (agentEvent.type === "tool_execution_start") {

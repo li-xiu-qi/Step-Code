@@ -8,7 +8,7 @@
 .stream-inner {
 	display: flex;
 	flex-direction: column;
-	gap: 24px;
+	gap: 10px;
 	width: 100%;
 	max-width: 760px;
 	min-height: 100%;
@@ -52,6 +52,15 @@
 .message.user {
 	align-items: flex-end;
 }
+/* A user message opens a turn: more room above it than between the steps of a turn. */
+.stream-inner > .message.user:not(:first-child) {
+	margin-top: 18px;
+}
+/* Stream text is a size smaller than shared Markdown and a touch heavier. */
+.message .message-body {
+	font-size: 14px;
+	font-weight: 500;
+}
 .message.assistant {
 	align-items: flex-start;
 }
@@ -69,10 +78,24 @@
 	width: 100%;
 }
 
-/* Same text metrics as .message-body so the reply replaces it without a jump. */
+/* Same text metrics as .message .message-body so the reply replaces it without a jump. */
 .thinking-indicator {
-	font-size: 15px;
+	font-size: 14px;
+	font-weight: 500;
 	line-height: 1.75;
+}
+
+/* Text the live reply just added fades in (features/conversation/streaming.ts sets a negative delay per chunk). */
+.stream-fade {
+	animation: stream-fade 420ms ease-out both;
+}
+@keyframes stream-fade {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 /* Message action row, first block (legacy styles.css 709-720). */
@@ -83,7 +106,8 @@
 	margin-top: 4px;
 	opacity: 0;
 }
-.message:hover .message-actions {
+.message:hover .message-actions,
+.message-actions:focus-within {
 	opacity: 1;
 }
 .message-action {
@@ -117,6 +141,10 @@
 	background: transparent;
 	text-align: left;
 	cursor: pointer;
+}
+/* Consecutive tool calls read as one block. */
+.tool-row + .tool-row {
+	margin-top: -8px;
 }
 .tool-row:hover {
 	background: var(--surface-soft);
@@ -271,4 +299,188 @@
 }
 @media (max-width: 480px) {
 	.approval { padding: 14px 12px; }
+}
+
+/* Files a finished turn changed (TurnChangesCard.tsx). */
+.turn-changes {
+	overflow: hidden;
+	margin: 4px 0 2px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-overlay);
+	background: var(--surface);
+}
+.turn-changes-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	padding: 12px;
+	border-bottom: 1px solid var(--line);
+}
+.turn-changes-icon {
+	display: grid;
+	flex: none;
+	place-items: center;
+	width: 40px;
+	height: 40px;
+	border-radius: var(--radius-panel);
+	background: var(--surface-soft);
+	color: var(--ink-2);
+}
+.turn-changes-icon .icon {
+	width: 20px;
+	height: 20px;
+}
+.turn-changes-summary {
+	display: grid;
+	flex: 1;
+	gap: 1px;
+	min-width: 0;
+	font-size: 14px;
+	line-height: 20px;
+}
+.turn-changes-summary strong {
+	overflow: hidden;
+	color: var(--ink);
+	font-weight: 500;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.turn-changes-summary .diff-stat {
+	font-size: 13px;
+}
+.turn-changes-actions {
+	display: flex;
+	flex: none;
+	align-items: center;
+	gap: 12px;
+}
+.turn-changes-undo {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: 28px;
+	padding: 0 4px;
+	border-radius: var(--radius-chip);
+	color: var(--ink);
+	font-size: 13px;
+	font-weight: 500;
+}
+.turn-changes-undo:hover:not(:disabled) {
+	background: var(--surface-soft);
+}
+.turn-changes-undo:disabled {
+	color: var(--ink-3);
+	cursor: default;
+}
+.turn-changes-review {
+	height: 28px;
+	padding: 0 9px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-surface);
+	background: var(--surface);
+	color: var(--ink);
+	font-size: 13px;
+	font-weight: 500;
+}
+.turn-changes-review:hover {
+	background: var(--surface-soft);
+}
+.turn-changes-files {
+	list-style: none;
+}
+.turn-change-file,
+.turn-changes-more {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	width: 100%;
+	height: 36px;
+	padding: 0 12px;
+	color: var(--ink);
+	font-size: 13px;
+	text-align: left;
+}
+.turn-change-file:hover,
+.turn-changes-more:hover {
+	background: var(--surface-soft);
+}
+.turn-change-file:focus-visible,
+.turn-changes-more:focus-visible {
+	outline: 2px solid var(--focus-border);
+	outline-offset: -2px;
+}
+.turn-change-path {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+}
+/* The folder part gives way first, cut from its start, so the file name stays readable. */
+.turn-change-dir {
+	overflow: hidden;
+	min-width: 0;
+	color: var(--ink-3);
+	direction: rtl;
+	text-align: left;
+	text-overflow: ellipsis;
+}
+.turn-change-name {
+	flex: none;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.turn-change-file .diff-stat,
+.turn-change-untracked {
+	margin-left: auto;
+}
+.turn-change-untracked {
+	flex: none;
+	color: var(--ink-3);
+	font-size: 12px;
+}
+/* Full path on hover, like the sidebar's data-tooltip; above the row, since the card clips what overflows it. */
+.turn-change-file[data-tooltip] {
+	position: relative;
+}
+.turn-change-file[data-tooltip]::after {
+	position: absolute;
+	bottom: calc(100% - 4px);
+	left: 12px;
+	z-index: 40;
+	display: none;
+	width: max-content;
+	max-width: calc(100% - 24px);
+	padding: 5px 8px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-input);
+	background: var(--surface);
+	color: var(--ink-2);
+	box-shadow: 0 6px 18px var(--shadow);
+	content: attr(data-tooltip);
+	font-size: 11px;
+	font-weight: 400;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+}
+.turn-change-file[data-tooltip]:hover::after,
+.turn-change-file[data-tooltip]:focus-visible::after {
+	display: block;
+}
+.turn-changes-note {
+	padding: 8px 12px;
+	border-top: 1px solid var(--line);
+	color: var(--ink-3);
+	font-size: 12px;
+}
+.turn-changes-more {
+	gap: 6px;
+	font-weight: 500;
+}
+.turn-changes-more .icon {
+	color: var(--ink-2);
+	transition: transform var(--fast) ease;
+}
+.turn-changes-more.open .icon {
+	transform: rotate(180deg);
 }

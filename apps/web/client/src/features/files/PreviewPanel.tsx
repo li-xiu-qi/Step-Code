@@ -20,6 +20,7 @@ import {
 	togglePreviewRendered,
 	togglePreviewWrap,
 } from "./actions";
+import { ChangesView } from "./ChangesView";
 import { isMarkdownPath } from "./highlight";
 import { PreviewBody, PreviewPath, useActiveTab } from "./PreviewBody";
 import { PreviewTabs } from "./PreviewTabs";
@@ -79,6 +80,7 @@ function PreviewTools() {
 export function PreviewPanel() {
 	const t = useT();
 	const open = useAppStore((state) => state.preview.open);
+	const changes = useAppStore((state) => state.preview.mode === "changes");
 	const panelRef = useRef<HTMLElement>(null);
 
 	// Before the first paint: restoring the width here avoids a jump from the default.
@@ -108,7 +110,8 @@ export function PreviewPanel() {
 				onReset={() => applyPreviewWidth(PREVIEW_DEFAULT)}
 				onDraggingChange={(resizing) => setUi({ resizing })}
 			/>
-			<div className="preview-tabs-row">
+			<ChangesView hidden={!open || !changes} />
+			<div className="preview-tabs-row" hidden={changes}>
 				<PreviewTabs />
 				<IconButton
 					id="previewClose"
@@ -118,18 +121,18 @@ export function PreviewPanel() {
 					onClick={() => setPreviewOpen(false)}
 				/>
 			</div>
-			<div className="preview-toolbar">
+			<div className="preview-toolbar" hidden={changes}>
 				<PreviewPath />
 				<PreviewTools />
 			</div>
-			<PreviewBody />
+			<PreviewBody hidden={changes} />
 		</aside>
 	);
 }
 
 export function PreviewShowButton() {
 	const t = useT();
-	const hidden = useAppStore((state) => state.preview.open || !state.preview.tabs.length);
+	const hidden = useAppStore((state) => state.preview.open || (!state.preview.tabs.length && !state.preview.changes));
 	return (
 		<IconButton
 			className="preview-show"

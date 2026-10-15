@@ -1,0 +1,13 @@
+.root {
+	display: inline-flex;
+	flex: none;
+	gap: 0.3em;
+	font-variant-numeric: tabular-nums;
+	white-space: nowrap;
+}
+.add {
+	color: var(--success);
+}
+.del {
+	color: var(--danger);
+}

@@ -347,3 +347,261 @@
 		box-shadow: -8px 0 24px var(--shadow);
 	}
 }
+
+/* Turn changes view (ChangesView.tsx): turn picker, file rows, inline diffs. */
+.changes-view {
+	display: flex;
+	flex: 1;
+	flex-direction: column;
+	min-height: 0;
+}
+.changes-header {
+	display: flex;
+	flex: none;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	height: 50px;
+	padding: 0 8px 0 8px;
+	border-bottom: 1px solid var(--line);
+}
+.changes-pill {
+	display: inline-flex;
+	align-items: center;
+	height: 33px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-pill);
+	background: var(--surface);
+}
+.changes-turn {
+	position: relative;
+	min-width: 0;
+}
+.changes-turn-button {
+	gap: 6px;
+	max-width: 100%;
+	padding: 0 12px 0 14px;
+	color: var(--ink);
+	font-size: 13px;
+	cursor: pointer;
+}
+.changes-turn-button:hover:not(:disabled) {
+	background: var(--surface-soft);
+}
+.changes-turn-button .icon {
+	color: var(--ink-2);
+}
+.changes-turn-button .diff-stat {
+	margin-left: 4px;
+}
+.changes-tools {
+	position: relative;
+	flex: none;
+	gap: 2px;
+	padding: 0 6px;
+}
+.changes-tools .icon-button {
+	width: 28px;
+	height: 26px;
+	color: var(--ink-2);
+}
+.changes-tools .icon-button:disabled {
+	opacity: 0.4;
+}
+.changes-menu {
+	position: absolute;
+	top: calc(100% + 6px);
+	z-index: 30;
+}
+.changes-turn-menu {
+	left: 0;
+}
+.changes-turn-menu [role="menu"] {
+	min-width: 200px;
+}
+.changes-turn-menu [aria-checked="true"] {
+	background: var(--selected);
+}
+.changes-more-menu,
+.changes-file-menu {
+	right: 0;
+}
+.changes-files {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	list-style: none;
+}
+.changes-file {
+	border-bottom: 1px solid var(--line);
+}
+.changes-file-row {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 2px;
+	height: 39px;
+	padding: 0 10px 0 0;
+}
+.changes-file.open .changes-file-row {
+	position: sticky;
+	top: 0;
+	z-index: 2;
+	border-bottom: 1px solid var(--line);
+	background: var(--canvas);
+}
+.changes-file-toggle {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	gap: 10px;
+	min-width: 0;
+	height: 100%;
+	padding: 0 8px 0 16px;
+	color: var(--ink);
+	font-size: 13px;
+	text-align: left;
+	cursor: pointer;
+}
+.changes-file-toggle:hover .changes-file-name {
+	text-decoration: underline;
+	text-underline-offset: 2px;
+}
+.changes-file-toggle:focus-visible {
+	outline: 2px solid var(--focus-border);
+	outline-offset: -2px;
+}
+/* Full path on hover, like the sidebar's data-tooltip. */
+.changes-file-toggle[data-tooltip] {
+	position: relative;
+}
+.changes-file-toggle[data-tooltip]::after {
+	position: absolute;
+	top: calc(100% - 4px);
+	left: 16px;
+	z-index: 40;
+	display: none;
+	width: max-content;
+	max-width: calc(100% - 24px);
+	padding: 5px 8px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-input);
+	background: var(--surface);
+	color: var(--ink-2);
+	box-shadow: 0 6px 18px var(--shadow);
+	content: attr(data-tooltip);
+	font-size: 11px;
+	font-weight: 400;
+	overflow-wrap: anywhere;
+	pointer-events: none;
+}
+.changes-file-toggle[data-tooltip]:hover::after,
+.changes-file-toggle[data-tooltip]:focus-visible::after {
+	display: block;
+}
+.changes-untracked {
+	padding: 10px 16px;
+	color: var(--ink-3);
+	font-size: 12px;
+}
+.changes-file-path {
+	display: flex;
+	flex: 1;
+	min-width: 0;
+	white-space: nowrap;
+}
+/* The folder part gives way first, cut from its start, so the file name stays readable. */
+.changes-file-dir {
+	overflow: hidden;
+	min-width: 0;
+	color: var(--ink-3);
+	direction: rtl;
+	text-align: left;
+	text-overflow: ellipsis;
+}
+.changes-file-name {
+	flex: none;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.changes-file-badge {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	width: 18px;
+	height: 18px;
+	border-radius: var(--radius-tiny);
+	color: var(--ink-3);
+	font: 700 10px / 1 var(--mono);
+	letter-spacing: -0.04em;
+}
+.changes-file-badge.markdown {
+	color: var(--success);
+	font-size: 11px;
+}
+.changes-file-badge.markup {
+	background: color-mix(in srgb, var(--attention) 20%, transparent);
+	color: color-mix(in srgb, var(--attention) 70%, var(--danger));
+}
+.changes-file-badge.script {
+	background: color-mix(in srgb, var(--accent) 14%, transparent);
+	color: var(--accent);
+	font-size: 8px;
+}
+.changes-file-badge.data {
+	color: var(--attention-ink);
+}
+.changes-file-action {
+	flex: none;
+	width: 26px;
+	height: 26px;
+	color: var(--ink-2);
+}
+.changes-file-action:disabled {
+	opacity: 0.35;
+}
+.changes-diff {
+	min-width: max-content;
+	padding: 4px 0 10px;
+	font: 13px / 21.5px var(--mono);
+	tab-size: 4;
+}
+.diff-line {
+	display: flex;
+	min-height: 21.5px;
+	padding-right: 16px;
+	white-space: pre;
+}
+.diff-line.add {
+	background: color-mix(in srgb, var(--success) 13%, transparent);
+	box-shadow: inset 4px 0 0 var(--success);
+}
+.diff-line.del {
+	background: color-mix(in srgb, var(--danger) 11%, transparent);
+	box-shadow: inset 4px 0 0 var(--danger);
+}
+.diff-line.hunk {
+	padding: 2px 16px;
+	background: var(--surface-soft);
+	color: var(--ink-3);
+	font-size: 12px;
+}
+.diff-number {
+	flex: none;
+	width: calc(var(--line-digits, 3) * 1ch + 36px);
+	padding-right: 14px;
+	color: var(--ink-3);
+	text-align: right;
+	user-select: none;
+}
+.diff-line.add .diff-number {
+	color: color-mix(in srgb, var(--success) 75%, var(--ink));
+}
+.diff-line.del .diff-number {
+	color: color-mix(in srgb, var(--danger) 75%, var(--ink));
+}
+.diff-code {
+	flex: 1;
+	color: var(--ink);
+}

@@ -64,6 +64,10 @@ export const ICON_NAMES = [
 	"question",
 	"pencil",
 	"terminal",
+	"fileDiff",
+	"undo",
+	"openExternal",
+	"fileSearch",
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -277,6 +281,56 @@ export function IconSprite() {
 				strokeLinecap="round"
 			>
 				<path d="M9 3.5v11M3.5 9h11" />
+			</symbol>
+			{/* Turn change card and the changes panel. */}
+			<symbol
+				id="i-fileDiff"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+			>
+				<rect x="3" y="2.75" width="12" height="12.5" rx="2.5" />
+				<path d="M9 5.5v4M7 7.5h4M7 12h4" />
+			</symbol>
+			<symbol
+				id="i-undo"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.5"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M6.5 3.75 3.75 6.5 6.5 9.25" />
+				<path d="M3.75 6.5h6.5a4 4 0 0 1 0 8H8" />
+			</symbol>
+			<symbol
+				id="i-openExternal"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M8 3.25H5A1.75 1.75 0 0 0 3.25 5v8A1.75 1.75 0 0 0 5 14.75h8A1.75 1.75 0 0 0 14.75 13v-3" />
+				<path d="M10.5 3.25h4.25V7.5M14.5 3.5 9 9" />
+			</symbol>
+			<symbol
+				id="i-fileSearch"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M8 15.25H5A1.75 1.75 0 0 1 3.25 13.5v-9A1.75 1.75 0 0 1 5 2.75h4.5l4 4v1.5" />
+				<path d="M9.5 2.75v4h4" />
+				<circle cx="11.75" cy="12" r="2.25" />
+				<path d="m13.4 13.65 1.6 1.6" />
 			</symbol>
 			<symbol id="i-more" viewBox="0 0 18 18" fill="currentColor">
 				<circle cx="4" cy="9" r="1.2" />

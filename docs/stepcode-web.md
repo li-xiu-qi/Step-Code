@@ -152,6 +152,28 @@ Both stay out of the way when there is nothing to report — the banner hides un
 the session has run a task or a subagent, and the token control hides until a
 turn reports usage — so neither shows a placeholder figure.
 
+Each finished turn (one user message up to the next, including a message with
+images only) that changed files gets a card under its last row: "Edited N
+files", the summed `+added -removed` lines, and the files (three, then "show N
+more"). The data is the unified patch in the tool result `details.patch`, which
+both `edit` and `write` record themselves inside the file mutation queue, so it
+is persisted with the session entry and survives a reload. A `write` patch is
+taken after approval and after earlier calls of the same batch, and the result
+also records `created` and the overwritten file's line ending and BOM
+(`previous`). A write over 1 MB or of a binary file gets no patch
+(`details.untracked` says why); the card marks such files as not revertable,
+and a turn that ran `bash` says that what those commands changed is neither
+listed nor reverted. Clicking a file opens the preview panel in its changes view
+(turn picker, one row per file, inline diff with line numbers).
+"Undo" calls `POST /api/v1/sessions/{id}/turns/{turnId}/revert`, which
+reverse-applies the turn's patches newest first and writes nothing unless every
+patch still matches the files on disk (409 otherwise, while a turn runs, or
+while another revert of the session is in progress; a prompt sent during a
+revert also gets 409). Created files are deleted, and an overwritten file gets
+its previous line ending and BOM back. Files without a patch are left alone and
+listed in the response's `skipped`, which the toast names. Reverted turn ids are
+kept in `web-sessions.json` and reported as `revertedTurns` in the snapshot.
+
 Session archive flags are Web Host metadata in `web-sessions.json`; canonical
 conversation history remains the StepCode v3 JSONL file. Deleting a session
 closes the runtime, removes the metadata entry, and removes that session's

@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { formatRelativeTime, useT } from "../../i18n";
 import { formatTokens } from "../../lib/format";
 import { renderMarkdown } from "../../lib/markdown";
@@ -7,6 +7,7 @@ import type { MessageTimelineItem } from "../../state/types";
 import { Icon, LEGACY_ICONS, MarkdownView } from "../../ui";
 import { forkAtEntry } from "./actions";
 import { openFeedback, type Sentiment } from "./feedback";
+import { useFadeIn, useSmoothText } from "./streaming";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 /**
@@ -16,18 +17,24 @@ import { ThinkingIndicator } from "./ThinkingIndicator";
 export const MessageItem = memo(function MessageItem({ item }: { readonly item: MessageTimelineItem }) {
 	const t = useT();
 	const role = item.role === "user" ? "user" : "assistant";
+	const live = item.itemId === "message-live";
 	const codeLabel = t("code");
 	const copyLabel = t("copy");
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const text = useSmoothText(item.content, live);
+	// A user message can be images only; it still opens a turn, so it gets a row.
+	const content = text || (role === "user" && item.images ? t("imageMessage", { count: item.images }) : text);
 	// Memoised: a streaming turn re-renders the timeline per frame, and parsing every earlier message each time made long sessions crawl.
 	const html = useMemo(
-		() => renderMarkdown(item.content, { code: codeLabel, copy: copyLabel }),
-		[item.content, codeLabel, copyLabel],
+		() => renderMarkdown(content, { code: codeLabel, copy: copyLabel }),
+		[content, codeLabel, copyLabel],
 	);
+	useFadeIn(bodyRef, html, live);
 	// The live turn before its first text (reasoning, or waiting on the first token).
-	if (role === "assistant" && !item.content) return <ThinkingIndicator />;
+	if (role === "assistant" && !content) return <ThinkingIndicator />;
 	return (
 		<article className={`message ${role}`} data-content={item.content || ""} data-entry-id={item.entryId}>
-			<MarkdownView className="message-body" html={html} onCopyCode={(code) => void copyText(code)} />
+			<MarkdownView ref={bodyRef} className="message-body" html={html} onCopyCode={(code) => void copyText(code)} />
 			{item.role === "assistant" ? <MessageActions item={item} /> : null}
 		</article>
 	);

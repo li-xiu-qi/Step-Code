@@ -3,7 +3,7 @@
  * `contentText`, `renderMarkdown`).
  *
  * The renderer is deliberately tiny: fenced code blocks, `#`/`##`/`###`
- * headings, `**bold**`, inline code and line breaks. Everything else is
+ * headings, `**bold**`, inline code, line breaks and paragraph gaps. Everything else is
  * escaped. Its output is an HTML string meant for `dangerouslySetInnerHTML`
  * (see ui/MarkdownView, which also wires the `.copy-code` buttons).
  */
@@ -47,12 +47,16 @@ export function renderMarkdown(value: unknown, labels: MarkdownLabels): string {
 			) - 1;
 		return `\u0000${index}\u0000`;
 	});
-	const html = escapeHtml(source)
+	const html = escapeHtml(source.replace(/\n{3,}/g, "\n\n"))
 		.replace(/^### (.+)$/gm, "<h4>$1</h4>")
 		.replace(/^## (.+)$/gm, "<h3>$1</h3>")
 		.replace(/^# (.+)$/gm, "<h2>$1</h2>")
 		.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
 		.replace(/`([^`]+)`/g, "<code>$1</code>")
+		// Headings and code blocks are blocks: the line breaks around them would only add empty lines.
+		.replace(/\n*(<h[234]>.*?<\/h[234]>|\u0000\d+\u0000)\n*/g, "$1")
+		// A blank line separates paragraphs with a small gap rather than a whole empty line.
+		.replace(/\n\n/g, '<span class="md-gap"></span>')
 		.replace(/\n/g, "<br>");
 	return html.replace(/\u0000(\d+)\u0000/g, (_match, index: string) => blocks[Number(index)] ?? "");
 }

@@ -47,6 +47,7 @@ import { ApprovalBroker, type ApprovalRequest } from "./approval.ts";
 import { type WebAttachment, withTextAttachments } from "./attachments.ts";
 import { ClarificationBroker, type ClarificationEvent } from "./clarification.ts";
 import { feedbackCategoryFor } from "./feedback.ts";
+import { type SkippedChange, TurnReverter } from "./turn-changes.ts";
 import { claimWebSessionWriter } from "./writer-lease.ts";
 
 // Re-exported so the server and tests have one import site for attachment types.
@@ -221,6 +222,7 @@ export class WebSession {
 	private releaseWriterLease?: () => void;
 	private writerLeasePath?: string;
 	private archived = false;
+	private readonly reverter = new TurnReverter();
 
 	private constructor(
 		id: string,
@@ -496,7 +498,13 @@ export class WebSession {
 		}
 	}
 
+	/** A revert is writing files right now; prompts wait for it. */
+	isReverting(): boolean {
+		return this.reverter.isBusy();
+	}
+
 	async send(text: string, attachments: readonly WebAttachment[] = []): Promise<void> {
+		if (this.isReverting()) throw new Error("Wait for the revert to finish");
 		this.unread = false;
 		const images = attachments
 			.filter((attachment) => attachment.kind === "image")
@@ -659,6 +667,7 @@ export class WebSession {
 			unread: this.unread,
 			sessionFile: manager.getSessionFile(),
 			archived: this.archived,
+			revertedTurns: this.reverter.revertedTurns(),
 			entries: manager.getBranch().map(projectEntry),
 			pendingApprovals: this.broker.pendingRequests(),
 			pendingClarifications: this.clarifications.pendingRequests(),
@@ -696,6 +705,23 @@ export class WebSession {
 		this.archived = archived;
 	}
 
+	setRevertedTurns(turnIds: readonly string[]): void {
+		this.reverter.setRevertedTurns(turnIds);
+	}
+
+	/**
+	 * Undo the file changes of the turn that starts at user entry `turnId`.
+	 * Refused while a turn runs: the agent could be writing the same files.
+	 * `record` persists the turn as reverted before the session takes another revert.
+	 */
+	async revertTurn(
+		turnId: string,
+		record: (turnId: string) => Promise<readonly string[]>,
+	): Promise<{ paths: string[]; skipped: readonly SkippedChange[] }> {
+		if (this.status === "running" || this.status === "waiting") throw new Error("Stop the running turn first");
+		return this.reverter.revert(turnId, this.session.sessionManager.getBranch(), this.cwd, record);
+	}
+
 	async close(): Promise<void> {
 		this.clarifications.clear();
 		this.broker.clear();
@@ -711,6 +737,8 @@ export class WebSession {
 
 interface WebSessionMetadata {
 	archived?: boolean;
+	/** User entry ids of turns whose file changes were reverted. */
+	revertedTurns?: string[];
 }
 
 class WebSessionMetadataStore {
@@ -739,9 +767,25 @@ class WebSessionMetadataStore {
 		return this.values.get(id)?.archived === true;
 	}
 
+	revertedTurns(id: string): string[] {
+		return this.values.get(id)?.revertedTurns ?? [];
+	}
+
 	async setArchived(id: string, archived: boolean): Promise<void> {
 		await this.load();
-		this.values.set(id, { archived });
+		this.values.set(id, { ...this.values.get(id), archived });
+		await this.save();
+	}
+
+	async addRevertedTurn(id: string, turnId: string): Promise<string[]> {
+		await this.load();
+		const revertedTurns = [...this.revertedTurns(id).filter((turn) => turn !== turnId), turnId];
+		this.values.set(id, { ...this.values.get(id), revertedTurns });
+		await this.save();
+		return revertedTurns;
+	}
+
+	private async save(): Promise<void> {
 		const serialized = JSON.stringify(Object.fromEntries(this.values), null, 2);
 		await mkdir(dirname(this.path), { recursive: true });
 		const temporary = `${this.path}.${process.pid}.tmp`;
@@ -752,11 +796,7 @@ class WebSessionMetadataStore {
 	async remove(id: string): Promise<void> {
 		await this.load();
 		this.values.delete(id);
-		const serialized = JSON.stringify(Object.fromEntries(this.values), null, 2);
-		await mkdir(dirname(this.path), { recursive: true });
-		const temporary = `${this.path}.${process.pid}.tmp`;
-		await writeFile(temporary, `${serialized}\n`, "utf8");
-		await rename(temporary, this.path);
+		await this.save();
 	}
 }
 
@@ -787,6 +827,7 @@ export class WebSessionStore {
 				sessionId: info.id,
 			});
 			opened.setArchived(this.metadata.isArchived(opened.id));
+			opened.setRevertedTurns(this.metadata.revertedTurns(opened.id));
 			this.sessions.set(opened.id, opened);
 			return opened;
 		})();
@@ -819,6 +860,15 @@ export class WebSessionStore {
 		await this.metadata.setArchived(id, archived);
 		session.setArchived(archived);
 		return session;
+	}
+
+	async revertTurn(
+		id: string,
+		turnId: string,
+	): Promise<{ session: WebSession; paths: string[]; skipped: readonly SkippedChange[] }> {
+		const session = await this.getOrOpen(id);
+		const result = await session.revertTurn(turnId, (turn) => this.metadata.addRevertedTurn(session.id, turn));
+		return { session, ...result };
 	}
 
 	async delete(id: string): Promise<void> {

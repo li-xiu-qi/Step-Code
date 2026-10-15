@@ -4,8 +4,9 @@
 
 import { t } from "../../i18n";
 import { apiSend, errorMessage } from "../../lib/api";
-import { forgetApproval, openSession, refreshSessions, showError } from "../../state/session";
+import { forgetApproval, openSession, refreshSessions, renderSnapshot, showError } from "../../state/session";
 import { getState } from "../../state/store";
+import type { TurnRevertResult } from "../../state/types";
 
 export type ApprovalVerdict = "deny" | "approve" | "approve_for_session";
 
@@ -44,6 +45,35 @@ export async function decideApproval(approvalId: string, verdict: ApprovalVerdic
 		return true;
 	} catch (error) {
 		showError(errorMessage(error));
+		return false;
+	}
+}
+
+/**
+ * Undo the file changes of the turn that starts at user entry `turnId`. The
+ * host refuses (409) when a file changed since; the reason lands in the toast.
+ */
+export async function revertTurn(turnId: string): Promise<boolean> {
+	const current = getState().current;
+	if (!current) return false;
+	try {
+		const result = await apiSend<TurnRevertResult>(
+			`/api/v1/sessions/${current.id}/turns/${encodeURIComponent(turnId)}/revert`,
+			"POST",
+		);
+		if (getState().current?.id === current.id) renderSnapshot(result.snapshot);
+		const count = result.paths.length;
+		const skipped = [...new Set(result.skipped.map((change) => change.path))];
+		// Files without a recorded diff stay as they are; say so instead of a plain success.
+		showError(
+			skipped.length
+				? t("turnRevertedSkippedToast", { count, paths: skipped.join(", ") })
+				: t("turnRevertedToast", { count }),
+			false,
+		);
+		return true;
+	} catch (error) {
+		showError(t("turnRevertFailed", { reason: errorMessage(error) }));
 		return false;
 	}
 }

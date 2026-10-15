@@ -21,7 +21,8 @@ import { closePreferenceSubmenus, toggleSidebar, toggleUserMenu, watchSystemThem
  */
 function handleEscape(): void {
 	const { ui } = getState();
-	if (ui.searchOpen) closeSearch();
+	if (ui.changesMenu) setUi({ changesMenu: null });
+	else if (ui.searchOpen) closeSearch();
 	else if (ui.workspaceBrowserOpen) setUi({ workspaceBrowserOpen: false });
 	else if (ui.workspacePopoverOpen) setUi({ workspacePopoverOpen: false });
 	else if (ui.tagPicker) setUi({ tagPicker: null });
@@ -54,7 +55,7 @@ function handleKeydown(event: KeyboardEvent): void {
 		event.preventDefault();
 		if (event.shiftKey) {
 			const { preview } = getState();
-			if (preview.tabs.length) setPreviewOpen(!preview.open);
+			if (preview.tabs.length || preview.changes) setPreviewOpen(!preview.open);
 		} else toggleSidebar();
 	}
 	if (mod && key === "k") {
