@@ -881,12 +881,14 @@ test(
       ),
       {
         workspaces: [extra],
+        removedWorkspaces: [],
       },
     )
 
     const removed = await browser.run(`
-		window.confirm = () => true;
 		$("#projectGroups .remove-workspace").click();
+		await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+		$("#removeWorkspaceConfirm").click();
 		await until(() => !projects().length, "workspace to be removed");
 		return projects();
 	`)
@@ -939,6 +941,7 @@ test(
       ),
       {
         workspaces: [extra],
+        removedWorkspaces: [],
       },
     )
 
@@ -962,10 +965,11 @@ test(
 
     const removed = await browser.run(`
 		$("#fileTreeBack").click();
-		window.confirm = () => true;
 		$("#projectGroups .remove-workspace").click();
+		await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+		$("#removeWorkspaceConfirm").click();
 		await until(() => !projects().length, "workspace to be removed");
-		return (await (await fetch("/api/v1/workspaces")).json()).workspaces;
+		return (await (await fetch("/api/v1/workspaces")).json()).workspaces.filter(workspace => !workspace.hidden);
 	`)
     assert.deepEqual(removed, [])
     assert.ok(
@@ -1161,4 +1165,68 @@ test("denying an approval never executes the command", { skip }, async () => {
     await until(async () => (await (await fetch("/api/v1/sessions/${id}")).json()).status === "completed", "denied turn settles");
   `);
   assert.equal(existsSync(join(workspace, "approval-denied.txt")), false);
+});
+
+test("workspaces with chats can be removed through the dialog, retained after reload and restored", { skip }, async () => {
+  const before = await browser.run(`
+    const session = $(".session-row.active").dataset.sessionId;
+    const project = $("#projectGroups .project-group");
+    const button = project.querySelector(".remove-workspace");
+    button.focus(); button.click();
+    await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+    const title = $("#removeWorkspaceTitle").textContent;
+    const description = $("#removeWorkspaceDescription").textContent;
+    const focused = document.activeElement.id;
+    $("#removeWorkspaceCancel").click();
+    await until(() => $("#removeWorkspaceModal").hidden, "cancel");
+    const restoredFocus = document.activeElement === button;
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen");
+    return { session, title, description, focused, restoredFocus };
+  `);
+  assert.equal(before.title, "移除 project?");
+  assert.match(before.description, /文件和现有聊天不会被删除/);
+  assert.equal(before.focused, "removeWorkspaceCancel");
+  assert.equal(before.restoredFocus, true);
+  await browser.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await browser.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  const removed = await browser.run(`
+    await until(() => $("#removeWorkspaceModal").hidden, "Escape closes dialog");
+    const button = $("#projectGroups .remove-workspace");
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen for close");
+    $("#removeWorkspaceModal header button").click();
+    await until(() => $("#removeWorkspaceModal").hidden, "close button");
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen for confirm");
+    const original = window.fetch; let calls = 0;
+    window.fetch = (...args) => {
+      if (String(args[0]).startsWith("/api/v1/workspaces?") && args[1]?.method === "DELETE") {
+        calls++;
+        if (calls === 1) return Promise.resolve(new Response(JSON.stringify({error:"removal fixture retry"}), {status:500, headers:{"content-type":"application/json"}}));
+      }
+      return original(...args);
+    };
+    $("#removeWorkspaceConfirm").click();
+    await until(() => !$("#removeWorkspaceConfirm").disabled && $("#errorToast").textContent.includes("removal fixture retry"), "retryable failure");
+    const kept = !$("#removeWorkspaceModal").hidden;
+    $("#removeWorkspaceConfirm").click(); $("#removeWorkspaceConfirm").click();
+    await until(() => $("#removeWorkspaceModal").hidden && !projects().length, "confirmed removal");
+    window.fetch = original;
+    return { calls, kept, session: $("#recentTasks .session-row.active")?.dataset.sessionId };
+  `);
+  assert.deepEqual(removed, { calls: 2, kept: true, session: before.session });
+  await browser.goto(`${origin}/`);
+  const reloaded = await browser.run(`
+    await until(() => $("#recentTasks .session-row"), "retained chats after reload");
+    return { projects: projects(), session: (await (await fetch("/api/v1/sessions/${before.session}")).json()).id };
+  `);
+  assert.deepEqual(reloaded, { projects: [], session: before.session });
+  assert.ok(existsSync(join(workspace, "README.md")));
+  await browser.run(`
+    await fetch("/api/v1/workspaces", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({path:${JSON.stringify(workspace)}}) });
+  `);
+  await browser.goto(`${origin}/`);
+  const restored = await browser.run(`
+    await until(() => $("#projectGroups .session-row"), "project restored with chats");
+    return projects();
+  `);
+  assert.deepEqual(restored, [workspace]);
 });

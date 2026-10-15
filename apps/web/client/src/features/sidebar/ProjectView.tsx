@@ -28,10 +28,13 @@ export function ProjectView() {
 
 	const projects = new Map<string, SessionSummary[]>();
 	const recent: SessionSummary[] = [];
+	const removed = new Set(view.workspaces.filter((workspace) => workspace.hidden).map((workspace) => workspace.path));
 	// Registered workspaces stay listed even before their first conversation,
 	// and a freshly added one (registry order is newest first) leads the list.
 	const registered = new Set(
-		view.workspaces.filter((workspace) => workspace.available).map((workspace) => workspace.path),
+		view.workspaces
+			.filter((workspace) => workspace.available && !workspace.hidden)
+			.map((workspace) => workspace.path),
 	);
 	if (!showArchived) {
 		const withSessions = new Set(view.sessions.filter((session) => !session.archived).map((session) => session.cwd));
@@ -39,7 +42,7 @@ export function ProjectView() {
 	}
 	for (const session of view.sessions) {
 		if (session.archived !== showArchived) continue;
-		if (!session.cwd || session.cwdAvailable === false) {
+		if (!session.cwd || session.cwdAvailable === false || removed.has(session.cwd)) {
 			recent.push(session);
 			continue;
 		}
@@ -62,7 +65,6 @@ export function ProjectView() {
 						cwd={cwd}
 						sessions={sessions}
 						folded={view.foldedProjects.has(cwd)}
-						registered={registered.has(cwd)}
 						hiddenIds={hiddenIds}
 						// With a filter, a group without a matching row is hidden (legacy applyTagFilter).
 						filteredOut={Boolean(filter) && sessions.every((session) => hiddenIds.has(session.id))}

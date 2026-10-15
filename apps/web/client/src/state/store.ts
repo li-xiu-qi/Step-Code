@@ -134,6 +134,7 @@ export interface UiState {
 	readonly workspacePopoverOpen: boolean;
 	/** `#workspaceBrowserModal` visible */
 	readonly workspaceBrowserOpen: boolean;
+	readonly workspaceRemoval: { readonly path: string; readonly pending: boolean } | null;
 	/** `#userPopover` visible */
 	readonly userMenuOpen: boolean;
 	/** Which settings submenu is unfolded (`#themeSubmenu` / `#languageSubmenu`). */
@@ -292,6 +293,7 @@ export function createInitialState(): AppState {
 			searchOpen: false,
 			workspacePopoverOpen: false,
 			workspaceBrowserOpen: false,
+			workspaceRemoval: null,
 			userMenuOpen: false,
 			preferenceSubmenu: null,
 			sessionMenu: null,

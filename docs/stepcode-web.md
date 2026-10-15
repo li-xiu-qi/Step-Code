@@ -112,11 +112,22 @@ kdialog fallback on Linux. One dialog at a time; a second request is refused
 with 409. When the mode is `browse`, or when the helper fails, the page falls
 back to the in-folder browser, so the button is never dead.
 `STEPCODE_WEB_DIRECTORY_PICKER=native|browse` overrides the detection. The registry is Web Host metadata in
-`web-workspaces.json` beside the session metadata: it only decides which
-folders the sidebar lists before they hold a conversation. Removing a workspace
-unregisters it and never touches files or sessions; the control is offered only
-while the workspace has no conversations, because a workspace with sessions is
-listed through them regardless.
+`web-workspaces.json` beside the session metadata. Its `workspaces` array lists
+registered folders; `removedWorkspaces` records explicitly removed folders,
+including folders inferred from existing sessions. `GET /api/v1/workspaces`
+returns removed folders with `hidden: true` so session refreshes and page reloads
+cannot recreate their project group. Hidden folders are excluded from recent
+folder choices; their conversations remain readable under Recent and searchable.
+Adding the folder again clears its removal marker and restores its project group.
+
+Every project header offers removal, with or without conversations. An in-app
+dialog names the project and explains that files and existing chats are retained.
+Cancel has initial focus; Cancel, close, backdrop and Escape dismiss without a
+request. Confirmation disables the controls while deletion of the navigation
+entry is pending. Failures leave the dialog available for retry; the endpoint is
+idempotent so a failed refresh after a successful removal can be retried. Removal
+does not close or interrupt the active conversation, modify its history, or
+change access to the cwd of an existing session.
 
 File browsing is keyed by folder, not by session, so an empty workspace can be
 browsed. `GET /api/v1/workspace/{files,file,raw,search}` take a `cwd` and answer

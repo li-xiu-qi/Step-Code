@@ -9,7 +9,7 @@ import { activeCwd, interruptCurrent } from "../../state/session";
 import { getState, setUi } from "../../state/store";
 import { openTree, setPreviewOpen } from "../files/actions";
 import { closeSearch, openSearch } from "../sidebar/actions";
-import { chooseWorkspaceFolder } from "../workspace/actions";
+import { chooseWorkspaceFolder, closeWorkspaceRemoval } from "../workspace/actions";
 import { closePreferenceSubmenus, toggleSidebar, toggleUserMenu, watchSystemTheme } from "./actions";
 
 /**
@@ -21,7 +21,8 @@ import { closePreferenceSubmenus, toggleSidebar, toggleUserMenu, watchSystemThem
  */
 function handleEscape(): void {
 	const { ui } = getState();
-	if (ui.slashMenu) setUi({ slashMenu: null });
+	if (ui.workspaceRemoval) closeWorkspaceRemoval();
+	else if (ui.slashMenu) setUi({ slashMenu: null });
 	else if (ui.changesMenu) setUi({ changesMenu: null });
 	else if (ui.searchOpen) closeSearch();
 	else if (ui.workspaceBrowserOpen) setUi({ workspaceBrowserOpen: false });
