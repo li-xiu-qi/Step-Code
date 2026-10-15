@@ -77,6 +77,10 @@
 交互模式内 `/mcp` 显示每个服务器的 `connecting` / `connected` / `failed` /
 `disabled` 及工具数量。
 
+`getStepMcpStatuses()`(从包入口导出)返回同一份列表:`config.toml` 里
+`enabled = false` 的服务器列为 `disabled`;启动失败的服务器带 `error`,内容与
+`notify` 的警告相同，供没有终端通知的宿主(StepCode Web)展示。
+
 ---
 
 ## 2. 新增了哪些指令

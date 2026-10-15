@@ -12,13 +12,15 @@ import { t } from "../i18n";
 import { api, apiSend, errorMessage, setUnauthorizedHandler } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { basename, clipDetail, compact, toolInputDetail, toolInputSummary } from "../lib/format";
-import { contentText } from "../lib/markdown";
+import { contentText, skillInvocation } from "../lib/markdown";
 import { type AppState, getState, mapWith, setState, setUi } from "./store";
 import type {
+	AgentMessage,
 	ApprovalRequest,
 	BootstrapPayload,
 	ClarificationRequest,
 	ContentPart,
+	FileChange,
 	SessionEntry,
 	SessionSnapshot,
 	SessionStatus,
@@ -69,9 +71,11 @@ export async function copyText(value: string, successText: string = t("copied"))
 
 /** Display title of a session (legacy `sessionTitle`, 719-725). */
 export function sessionTitle(session: Partial<SessionSummary> | null | undefined): string {
+	// A conversation opened with a skill starts with (and is auto-named after) the skill's whole instructions.
+	const text = session?.name || session?.firstMessage;
+	const skill = text ? skillInvocation(text) : null;
 	return (
-		session?.name ||
-		session?.firstMessage ||
+		(skill ? skill.request || skill.name : text) ||
 		(session?.id ? `Session ${session.id.slice(0, 8)}` : t("newConversation"))
 	);
 }
@@ -119,6 +123,18 @@ export function mergeSessionSummary(
 	return next;
 }
 
+/**
+ * The file change of a finished edit/write call: the host records a unified
+ * patch in the result details of both (runtime.ts `WriteCapture`).
+ */
+function fileChange(name: string, args: unknown, result: AgentMessage | undefined): FileChange | undefined {
+	if ((name !== "edit" && name !== "write") || !result || result.isError) return undefined;
+	const patch = (result.details as { patch?: unknown } | undefined)?.patch;
+	const input = (args ?? {}) as { path?: unknown; file_path?: unknown };
+	const path = typeof input.path === "string" ? input.path : input.file_path;
+	return typeof patch === "string" && typeof path === "string" && path ? { path, patch } : undefined;
+}
+
 /** Project session entries into timeline rows (legacy `timelineFromEntries`, 2055-2096). */
 export function timelineFromEntries(entries: readonly SessionEntry[] = []): TimelineItem[] {
 	const items: TimelineItem[] = [];
@@ -147,6 +163,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const block of (message.content as readonly ContentPart[]).filter((part) => part?.type === "toolCall")) {
 				const result = toolResults.get(String(block.id));
+				const change = fileChange(String(block.name ?? ""), block.arguments, result);
 				items.push({
 					itemId: `tool-${block.id}`,
 					kind: "tool",
@@ -156,6 +173,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 					outputSummary: result ? compact(contentText(result.content)) : "",
 					inputDetail: toolInputDetail(block.arguments),
 					outputDetail: result ? clipDetail(contentText(result.content)) : "",
+					...(change ? { change } : {}),
 				});
 			}
 		}

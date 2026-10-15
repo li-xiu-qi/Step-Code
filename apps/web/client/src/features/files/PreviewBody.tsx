@@ -93,7 +93,7 @@ function PreviewContent({ tab }: { readonly tab: PreviewTab }) {
 	return <CodeView content={file.content} path={file.path} />;
 }
 
-export function PreviewBody() {
+export function PreviewBody({ hidden = false }: { readonly hidden?: boolean }) {
 	const tabs = useAppStore((state) => state.preview.tabs);
 	const active = useAppStore((state) => state.preview.active);
 	const tab = tabs[active];
@@ -106,7 +106,7 @@ export function PreviewBody() {
 	}, [tabs, active]);
 
 	return (
-		<div className="preview-body" id="previewBody" ref={bodyRef}>
+		<div className="preview-body" id="previewBody" ref={bodyRef} hidden={hidden}>
 			{tab ? <PreviewContent tab={tab} /> : null}
 		</div>
 	);

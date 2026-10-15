@@ -2,13 +2,25 @@
  * JSON fetch wrapper for the StepCode Web host API (legacy app.js `api()`).
  *
  * Every request carries `content-type: application/json`; a non-2xx response
- * throws an Error whose message is the server's `error` field (or `HTTP <n>`).
+ * throws an ApiError whose message is the server's `error` field (or `HTTP <n>`).
  * A 401 additionally triggers the registered unauthorized handler, which the
  * session layer uses to show the "connection lost" banner: the launch token is
  * single-use, so a stale cookie is an expected state, not a bug.
  */
 
 type UnauthorizedHandler = () => void;
+
+/** A non-2xx response; `body` is the parsed JSON error payload (`error` plus any extra fields). */
+export class ApiError extends Error {
+	readonly status: number;
+	readonly body: Readonly<Record<string, unknown>>;
+
+	constructor(status: number, body: Readonly<Record<string, unknown>>) {
+		super(typeof body.error === "string" ? body.error : `HTTP ${status}`);
+		this.status = status;
+		this.body = body;
+	}
+}
 
 let unauthorizedHandler: UnauthorizedHandler | undefined;
 
@@ -24,8 +36,8 @@ export async function api<T = unknown>(path: string, options: RequestInit = {}):
 	});
 	if (response.status === 401) unauthorizedHandler?.();
 	if (!response.ok) {
-		const payload = (await response.json().catch(() => ({}))) as { error?: string };
-		throw new Error(payload.error ?? `HTTP ${response.status}`);
+		const payload = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+		throw new ApiError(response.status, payload);
 	}
 	return (await response.json()) as T;
 }

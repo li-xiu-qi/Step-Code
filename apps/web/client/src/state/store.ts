@@ -90,7 +90,21 @@ export interface PreviewTab {
 	readonly rendered: boolean;
 }
 
+/** The preview panel's turn-changes view (features/files/ChangesView). */
+export interface ChangesViewState {
+	/** User entry id of the turn shown. */
+	readonly turnId: string;
+	/** Shown paths whose diff is unfolded. */
+	readonly expanded: ReadonlySet<string>;
+	/** Path to scroll into view, and a counter so asking twice scrolls twice. */
+	readonly focus: string | null;
+	readonly focusSeq: number;
+}
+
 export interface PreviewState {
+	/** `files` shows the tabs; `changes` the turn-changes view. */
+	readonly mode: "files" | "changes";
+	readonly changes: ChangesViewState | null;
 	readonly tabs: readonly PreviewTab[];
 	/** Index into `tabs`, -1 when there are none. */
 	readonly active: number;
@@ -143,6 +157,10 @@ export interface UiState {
 	readonly promptFocusRequest: number;
 	/** Mid-pane view covering the conversation: `#cronView` or `#marketView` (`.market-view.open`). */
 	readonly midView: "cron" | "market" | null;
+	/** Open menu of the changes view: `turn`, `more`, or `file:<shown path>`. */
+	readonly changesMenu: string | null;
+	/** The composer's slash menu: matching commands, or the MCP server list picked from it. */
+	readonly slashMenu: "commands" | "mcp" | null;
 }
 
 export interface ToastState {
@@ -250,6 +268,8 @@ export function createInitialState(): AppState {
 		treeExpandedByCwd: new Map(),
 		workspaces: [],
 		preview: {
+			mode: "files",
+			changes: null,
 			tabs: [],
 			active: -1,
 			open: false,
@@ -280,6 +300,8 @@ export function createInitialState(): AppState {
 			loggedOut: false,
 			promptFocusRequest: 0,
 			midView: null,
+			changesMenu: null,
+			slashMenu: null,
 		},
 		toast: null,
 	};

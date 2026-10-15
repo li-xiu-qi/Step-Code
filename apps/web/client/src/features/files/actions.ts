@@ -19,6 +19,7 @@ import {
 	type PreviewTab,
 	setPreview,
 	setState,
+	setToggled,
 	setTree,
 	setUi,
 	setWith,
@@ -242,10 +243,54 @@ export async function openFile(cwd: string, path: string): Promise<void> {
 			tabs = [...tabs, { cwd, path, file: null, error: "", loading: false, rendered: false }];
 			index = tabs.length - 1;
 		}
-		return { ...preview, tabs, active: index, open: true };
+		return { ...preview, tabs, active: index, open: true, mode: "files" };
 	});
 	const preview = getState().preview;
 	if (!preview.tabs[preview.active]?.file) await loadPreviewTab(cwd, path);
+}
+
+/* ── Turn changes ────────────────────────────────────────────────────────── */
+
+/**
+ * Show a turn's changed files in the preview panel; `path` (a shown path)
+ * is unfolded and scrolled to.
+ */
+export function openTurnChanges(turnId: string, path?: string): void {
+	setPreview((preview) => {
+		const previous = preview.changes?.turnId === turnId ? preview.changes : null;
+		return {
+			...preview,
+			open: true,
+			mode: "changes",
+			changes: {
+				turnId,
+				expanded: path ? setWith(previous?.expanded ?? new Set<string>(), path) : (previous?.expanded ?? new Set()),
+				focus: path ?? null,
+				focusSeq: (preview.changes?.focusSeq ?? 0) + 1,
+			},
+		};
+	});
+}
+
+/** Fold or unfold one file's diff in the changes view. */
+export function toggleChangedFile(path: string, expand?: boolean): void {
+	setPreview((preview) =>
+		preview.changes
+			? { ...preview, changes: { ...preview.changes, expanded: setToggled(preview.changes.expanded, path, expand) } }
+			: preview,
+	);
+}
+
+/** Unfold every listed file, or fold them all. */
+export function setChangedFilesExpanded(paths: readonly string[]): void {
+	setPreview((preview) =>
+		preview.changes ? { ...preview, changes: { ...preview.changes, expanded: new Set(paths) } } : preview,
+	);
+}
+
+/** Back to the file tabs from the changes view. */
+export function showPreviewFiles(): void {
+	setPreview((preview) => ({ ...preview, mode: "files", open: preview.tabs.length > 0 }));
 }
 
 /** Close one tab; closing the last one hides the panel (legacy `closePreviewTab`, 1760-1769). */

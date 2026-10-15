@@ -3,9 +3,10 @@
  */
 
 import { t } from "../../i18n";
-import { apiSend, errorMessage } from "../../lib/api";
-import { forgetApproval, openSession, refreshSessions, showError } from "../../state/session";
+import { ApiError, apiSend, errorMessage } from "../../lib/api";
+import { forgetApproval, openSession, refreshSessions, renderSnapshot, showError } from "../../state/session";
 import { getState } from "../../state/store";
+import type { SessionSnapshot } from "../../state/types";
 
 export type ApprovalVerdict = "deny" | "approve" | "approve_for_session";
 
@@ -44,6 +45,37 @@ export async function decideApproval(approvalId: string, verdict: ApprovalVerdic
 		return true;
 	} catch (error) {
 		showError(errorMessage(error));
+		return false;
+	}
+}
+
+/** The toast for a refused revert (host `TurnRevertError` codes). */
+function revertFailure(error: unknown): string {
+	const body = error instanceof ApiError ? error.body : {};
+	const path = typeof body.path === "string" ? body.path : "";
+	if (body.code === "conflict") return t("turnRevertConflict", { path });
+	if (body.code === "missing") return t("turnRevertMissing", { path });
+	if (body.code === "busy") return t("turnRevertBusy");
+	return t("turnRevertFailed", { reason: errorMessage(error) });
+}
+
+/**
+ * Undo the file changes of the turn that starts at user entry `turnId`. The
+ * host refuses (409) when a file changed since; the reason lands in the toast.
+ */
+export async function revertTurn(turnId: string): Promise<boolean> {
+	const current = getState().current;
+	if (!current) return false;
+	try {
+		const result = await apiSend<{ snapshot: SessionSnapshot; paths: string[] }>(
+			`/api/v1/sessions/${current.id}/turns/${encodeURIComponent(turnId)}/revert`,
+			"POST",
+		);
+		if (getState().current?.id === current.id) renderSnapshot(result.snapshot);
+		showError(t("turnRevertedToast", { count: result.paths.length }), false);
+		return true;
+	} catch (error) {
+		showError(revertFailure(error));
 		return false;
 	}
 }

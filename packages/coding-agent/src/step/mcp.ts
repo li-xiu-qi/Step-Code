@@ -80,6 +80,8 @@ export interface StepMcpStatus {
 	name: string;
 	status: "connecting" | "connected" | "failed" | "disabled";
 	toolCount: number;
+	/** Why the server failed to start, as reported to the user. */
+	error?: string;
 }
 
 let currentMcpStatuses: StepMcpStatus[] = [];
@@ -140,6 +142,10 @@ export function createStepMcpExtension(): ExtensionFactory {
 							status: "connecting",
 							toolCount: 0,
 						}),
+					),
+					// Listed after the discovered servers, whose indexes the startup below writes to.
+					...disabledGlobalServerNames().map(
+						(name): StepMcpStatus => ({ name, status: "disabled", toolCount: 0 }),
 					),
 				);
 				await Promise.all(
@@ -218,20 +224,14 @@ export function createStepMcpExtension(): ExtensionFactory {
 						} catch (error) {
 							if (connected) await closeStepMcpServer(connected);
 							if (controller.signal.aborted) return;
-							statuses[index] = {
+							const failure = describeMcpStartFailure({
 								name: item.name,
-								status: "failed",
-								toolCount: 0,
-							};
-							ctx.ui.notify(
-								describeMcpStartFailure({
-									name: item.name,
-									command: item.declaration.command ?? item.declaration.url ?? "configured server",
-									provision: item.provision,
-									error,
-								}),
-								"warning",
-							);
+								command: item.declaration.command ?? item.declaration.url ?? "configured server",
+								provision: item.provision,
+								error,
+							});
+							statuses[index] = { name: item.name, status: "failed", toolCount: 0, error: failure };
+							ctx.ui.notify(failure, "warning");
 						}
 					}),
 				);
@@ -327,6 +327,14 @@ export async function ambiguousPluginServerNames(name: string): Promise<string[]
 	const qualified = `${PLUGIN_SERVER_SEPARATOR}${name}`;
 	const matches = discovered.filter((server) => server.name.endsWith(qualified)).map((server) => server.name);
 	return matches.length > 1 ? matches : [];
+}
+
+/** Servers that global config.toml declares with `enabled = false`; discovery skips them. */
+function disabledGlobalServerNames(): string[] {
+	const config = readGlobalStepConfig(process.env);
+	return Object.entries(config.mcp_servers ?? {})
+		.filter(([, declaration]) => isRecord(declaration) && declaration.enabled === false)
+		.map(([name]) => name);
 }
 
 export async function discoverStepMcpServers(cwd: string, projectTrusted: boolean): Promise<DiscoveredServer[]> {

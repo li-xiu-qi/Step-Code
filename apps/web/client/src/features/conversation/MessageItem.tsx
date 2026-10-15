@@ -1,34 +1,60 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { formatRelativeTime, useT } from "../../i18n";
 import { formatTokens } from "../../lib/format";
-import { renderMarkdown } from "../../lib/markdown";
+import { renderMarkdown, skillInvocation } from "../../lib/markdown";
 import { copyText } from "../../state/session";
 import type { MessageTimelineItem } from "../../state/types";
 import { Icon, LEGACY_ICONS, MarkdownView } from "../../ui";
 import { forkAtEntry } from "./actions";
 import { openFeedback, type Sentiment } from "./feedback";
+import { useFadeIn, useSmoothText } from "./streaming";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 
 /**
  * One chat message (legacy `renderTimeline` message branch, app.js 2253-2261).
  * `data-content` and `data-entry-id` are kept from the legacy markup.
  */
-export const MessageItem = memo(function MessageItem({ item }: { readonly item: MessageTimelineItem }) {
+export const MessageItem = memo(function MessageItem({
+	item,
+	showActions = false,
+}: {
+	readonly item: MessageTimelineItem;
+	/** The action row goes under the last reply of a finished turn only. */
+	readonly showActions?: boolean;
+}) {
 	const t = useT();
 	const role = item.role === "user" ? "user" : "assistant";
+	const live = item.itemId === "message-live";
 	const codeLabel = t("code");
 	const copyLabel = t("copy");
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const skill = role === "user" ? skillInvocation(item.content) : null;
+	const content = useSmoothText(skill ? skill.request : item.content, live);
 	// Memoised: a streaming turn re-renders the timeline per frame, and parsing every earlier message each time made long sessions crawl.
 	const html = useMemo(
-		() => renderMarkdown(item.content, { code: codeLabel, copy: copyLabel }),
-		[item.content, codeLabel, copyLabel],
+		() => renderMarkdown(content, { code: codeLabel, copy: copyLabel }),
+		[content, codeLabel, copyLabel],
 	);
+	useFadeIn(bodyRef, html, live);
 	// The live turn before its first text (reasoning, or waiting on the first token).
-	if (role === "assistant" && !item.content) return <ThinkingIndicator />;
+	if (role === "assistant" && !content) return <ThinkingIndicator />;
 	return (
 		<article className={`message ${role}`} data-content={item.content || ""} data-entry-id={item.entryId}>
-			<MarkdownView className="message-body" html={html} onCopyCode={(code) => void copyText(code)} />
-			{item.role === "assistant" ? <MessageActions item={item} /> : null}
+			{skill ? (
+				<span className="message-skill" title={skill.name}>
+					<Icon name="cube" size="xs" />
+					{skill.name}
+				</span>
+			) : null}
+			{content ? (
+				<MarkdownView
+					ref={bodyRef}
+					className="message-body"
+					html={html}
+					onCopyCode={(code) => void copyText(code)}
+				/>
+			) : null}
+			{item.role === "assistant" && showActions ? <MessageActions item={item} /> : null}
 		</article>
 	);
 });

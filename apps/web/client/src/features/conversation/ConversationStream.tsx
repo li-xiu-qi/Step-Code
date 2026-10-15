@@ -1,10 +1,12 @@
-import { useLayoutEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useLocale, useT } from "../../i18n";
+import { collectTurnChanges } from "../../lib/turn-changes";
 import { useAppStore } from "../../state/store";
 import type { TimelineItem } from "../../state/types";
 import { MessageItem } from "./MessageItem";
 import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ApprovalCard, ToolRow } from "./TimelineRows";
+import { TurnChangesCard } from "./TurnChangesCard";
 
 /** Shown while the timeline is empty (legacy index.html 835-842, `renderTimeline`). */
 function EmptyConversation() {
@@ -49,36 +51,111 @@ function awaitingOutput(items: readonly TimelineItem[]): boolean {
 	return false;
 }
 
+function scrollToEnd(stream: HTMLElement | null): void {
+	if (stream) stream.scrollTop = stream.scrollHeight;
+}
+
+/** Within this many pixels of the end the stream counts as "at the bottom" and follows new output. */
+const STICK_THRESHOLD = 48;
+
+/**
+ * Index of each turn's closing assistant message: only it gets the action row,
+ * so intermediate replies between tool calls stay compact. The running turn
+ * has none yet.
+ */
+function turnEndMessages(items: readonly TimelineItem[], running: boolean): ReadonlySet<number> {
+	const ends = new Set<number>();
+	let candidate = -1;
+	items.forEach((item, index) => {
+		// A reply followed by tool calls (an interrupted turn) is not the turn's end.
+		if (item.kind === "tool") candidate = -1;
+		if (item.kind !== "message") return;
+		if (item.role === "user") {
+			if (candidate >= 0) ends.add(candidate);
+			candidate = -1;
+		} else candidate = index;
+	});
+	if (candidate >= 0 && !running) ends.add(candidate);
+	return ends;
+}
+
 /**
  * `#stream > #streamInner`: the session timeline (legacy `renderTimeline`,
- * app.js 2246-2281). Like the legacy renderer it jumps to the bottom every time
- * the timeline (or the language) changes. The task banner and usage trigger the
- * legacy function refreshed afterwards derive from the store on their own.
+ * app.js 2246-2281). New output keeps the view pinned to the bottom only while
+ * the reader is there: scrolling up during a turn leaves the view alone.
+ * Opening a session or sending a message pins it again.
  */
 export function ConversationStream() {
 	const items = useAppStore((state) => state.timelineItems);
 	const pendingTurn = useAppStore((state) => state.pendingTurn);
-	const running = useAppStore((state) => state.current?.status === "running");
+	const sessionId = useAppStore((state) => state.current?.id ?? "");
+	const cwd = useAppStore((state) => state.current?.cwd ?? "");
+	const status = useAppStore((state) => state.current?.status);
+	const revertedTurns = useAppStore((state) => state.current?.revertedTurns);
+	const running = status === "running";
+	const busy = running || status === "waiting";
 	const locale = useLocale();
 	const streamRef = useRef<HTMLDivElement>(null);
+	const innerRef = useRef<HTMLDivElement>(null);
+	const stick = useRef(true);
 	const keys = itemKeys(items);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: legacy renderTimeline scrolled to the bottom on every redraw; items, the pending message and locale are the redraw triggers.
+	const turns = useMemo(() => collectTurnChanges(items, cwd), [items, cwd]);
+	const ends = useMemo(() => turnEndMessages(items, busy || pendingTurn !== null), [items, busy, pendingTurn]);
+
+	// A new session or a sent message: follow the bottom again.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the session id and the pending message are the triggers.
 	useLayoutEffect(() => {
+		stick.current = true;
+		scrollToEnd(streamRef.current);
+	}, [sessionId, pendingTurn]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: items and locale change the content height.
+	useLayoutEffect(() => {
+		if (stick.current) scrollToEnd(streamRef.current);
+	}, [items, locale]);
+	// The live reply grows between store updates (smooth reveal), so watch the size too.
+	useEffect(() => {
+		const inner = innerRef.current;
+		if (!inner) return;
+		const observer = new ResizeObserver(() => {
+			if (stick.current) scrollToEnd(streamRef.current);
+		});
+		observer.observe(inner);
+		return () => observer.disconnect();
+	}, []);
+	const onScroll = () => {
 		const stream = streamRef.current;
-		if (stream) stream.scrollTop = stream.scrollHeight;
-	}, [items, pendingTurn, locale]);
+		if (stream) stick.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < STICK_THRESHOLD;
+	};
+
 	// A pending message is drawn after the timeline, so the indicator follows it.
 	const thinking = pendingTurn !== null || (running && awaitingOutput(items));
+	const cardAfter = new Map(
+		turns
+			.filter((turn) => !turn.latest || pendingTurn !== null || !busy)
+			.map((turn) => [turn.lastIndex, turn] as const),
+	);
 	return (
-		<div className="stream" id="stream" ref={streamRef}>
-			<div className="stream-inner" id="streamInner">
+		<div className="stream" id="stream" ref={streamRef} onScroll={onScroll}>
+			<div className="stream-inner" id="streamInner" ref={innerRef}>
 				{items.length || pendingTurn ? (
 					<>
 						{items.map((item, index) => {
-							const key = keys[index];
-							if (item.kind === "message") return <MessageItem key={key} item={item} />;
-							if (item.kind === "tool") return <ToolRow key={key} item={item} />;
-							return <ApprovalCard key={key} approval={item.approval} />;
+							const card = cardAfter.get(index);
+							// Always a fragment, so a card appearing under a row does not remount the row.
+							return (
+								<Fragment key={keys[index]}>
+									{item.kind === "message" ? (
+										<MessageItem item={item} showActions={ends.has(index)} />
+									) : item.kind === "tool" ? (
+										<ToolRow item={item} />
+									) : (
+										<ApprovalCard approval={item.approval} />
+									)}
+									{card ? (
+										<TurnChangesCard turn={card} reverted={Boolean(revertedTurns?.includes(card.turnId))} />
+									) : null}
+								</Fragment>
+							);
 						})}
 						{pendingTurn ? (
 							<MessageItem

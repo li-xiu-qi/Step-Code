@@ -18,8 +18,11 @@ import {
 	createStepSessionManagerFactory,
 	createStepSettingsManager,
 	createUltraloopOptInExtension,
+	DefaultResourceLoader,
 	type ExtensionUIContext,
+	generateUnifiedPatch,
 	getStepAuthPath,
+	getStepMcpStatuses,
 	type InlineExtension,
 	listAllStepSessions,
 	ModelRuntime,
@@ -37,6 +40,7 @@ import {
 	type SessionInfo,
 	STEP_PERMISSION_PRESETS,
 	STEP_PROVIDER_ID,
+	type StepMcpStatus,
 	type StepPermissionPresetId,
 	type StepSettingsManager,
 	submitFeedback as submitKernelFeedback,
@@ -47,6 +51,16 @@ import { ApprovalBroker, type ApprovalRequest } from "./approval.ts";
 import { type WebAttachment, withTextAttachments } from "./attachments.ts";
 import { ClarificationBroker, type ClarificationEvent } from "./clarification.ts";
 import { feedbackCategoryFor } from "./feedback.ts";
+import { type WebSkill, webSkills } from "./skills.ts";
+import {
+	revertedTurnIds,
+	revertTurnChanges,
+	TURN_REVERT_TYPE,
+	TurnRevertError,
+	turnChanges,
+	turnRevertNotice,
+	WriteCapture,
+} from "./turn-changes.ts";
 import { claimWebSessionWriter } from "./writer-lease.ts";
 
 // Re-exported so the server and tests have one import site for attachment types.
@@ -104,6 +118,14 @@ export type WebEvent =
 
 export type WebSessionStatus = "idle" | "running" | "waiting" | "completed" | "failed";
 
+/**
+ * MCP servers of the host process. The kernel keeps one status list, written
+ * by the session that started last; the Web host renders no `/mcp` notify text.
+ */
+export function mcpStatuses(): StepMcpStatus[] {
+	return getStepMcpStatuses();
+}
+
 /** The session modes the composer can toggle. Each is independent of the others. */
 export type WebMode = "goal" | "plan" | "ultraloop";
 
@@ -152,7 +174,11 @@ function webUiContext(broker: ApprovalBroker, clarifications: ClarificationBroke
 	};
 }
 
-function makeExtensions(settingsManager: StepSettingsManager, broker: ApprovalBroker): InlineExtension[] {
+function makeExtensions(
+	settingsManager: StepSettingsManager,
+	broker: ApprovalBroker,
+	writes: WriteCapture,
+): InlineExtension[] {
 	const telemetry = NOOP_OBSERVABILITY_PROVIDER.createReporter();
 	const persisted = settingsManager.getStepSettings();
 	const permission = {
@@ -163,8 +189,14 @@ function makeExtensions(settingsManager: StepSettingsManager, broker: ApprovalBr
 		name: "StepCode Web host",
 		hidden: true,
 		factory: (pi) => {
-			pi.on("tool_call", (event) => {
+			pi.on("tool_call", async (event, context) => {
 				broker.captureToolCall(event.toolCallId, event.toolName, event.input);
+				// Before the write runs: its result gets a patch so the turn card can show the diff.
+				await writes.capture(event.toolCallId, event.toolName, event.input, context.cwd);
+			});
+			pi.on("tool_result", (event) => {
+				const details = writes.details(event.toolCallId, event.toolName, event.input, event.isError);
+				return details ? { details } : undefined;
 			});
 			pi.on("session_start", (_event, context) => {
 				context.ui.notify("StepCode Web session ready");
@@ -211,6 +243,7 @@ function projectEntry(entry: SessionEntry): Record<string, unknown> {
 export class WebSession {
 	readonly broker: ApprovalBroker;
 	readonly clarifications: ClarificationBroker;
+	private readonly writes = new WriteCapture(generateUnifiedPatch);
 	private readonly listeners = new Set<(event: WebEvent) => void>();
 	private runtime!: AgentSessionRuntime;
 	private session!: AgentSession;
@@ -342,7 +375,7 @@ export class WebSession {
 				configDirName: resolveStepConfigDir(),
 				settingsManager,
 				modelRuntime: this.modelRuntime,
-				resourceLoaderOptions: { extensionFactories: makeExtensions(settingsManager, this.broker) },
+				resourceLoaderOptions: { extensionFactories: makeExtensions(settingsManager, this.broker, this.writes) },
 			});
 			// Resolve the model against a populated catalog. `models.json` is only an
 			// offline baseline and Step ships none, so an unrefreshed runtime offers
@@ -659,6 +692,7 @@ export class WebSession {
 			unread: this.unread,
 			sessionFile: manager.getSessionFile(),
 			archived: this.archived,
+			revertedTurns: revertedTurnIds(manager.getBranch()),
 			entries: manager.getBranch().map(projectEntry),
 			pendingApprovals: this.broker.pendingRequests(),
 			pendingClarifications: this.clarifications.pendingRequests(),
@@ -692,13 +726,48 @@ export class WebSession {
 		return this.session.sessionManager.getSessionFile();
 	}
 
+	/** Skills of this session's resource loader (plugin skills included), unless skill commands are off. */
+	skills(): WebSkill[] {
+		if (!this.session.settingsManager.getEnableSkillCommands()) return [];
+		return webSkills(this.session.resourceLoader.getSkills().skills);
+	}
+
 	setArchived(archived: boolean): void {
 		this.archived = archived;
+	}
+
+	/**
+	 * Undo the file changes of the turn that starts at user entry `turnId`.
+	 * Refused while a turn runs: the agent could be writing the same files.
+	 *
+	 * The model is told through a custom message (in its context, not a new
+	 * turn): otherwise it still believes its edits are on disk. The same entry
+	 * marks the turn as reverted, so the state follows the session branch.
+	 */
+	async revertTurn(turnId: string): Promise<string[]> {
+		if (this.status === "running" || this.status === "waiting")
+			throw new TurnRevertError("busy", "Stop the running turn first");
+		const branch = this.session.sessionManager.getBranch();
+		if (revertedTurnIds(branch).includes(turnId))
+			throw new TurnRevertError("reverted", "This turn was already reverted");
+		const changes = turnChanges(branch, turnId);
+		const paths = await revertTurnChanges(changes, this.cwd);
+		await this.session.sendCustomMessage(
+			{
+				customType: TURN_REVERT_TYPE,
+				content: turnRevertNotice(branch, turnId, changes),
+				display: false,
+				details: { turnId, paths },
+			},
+			{ triggerTurn: false },
+		);
+		return paths;
 	}
 
 	async close(): Promise<void> {
 		this.clarifications.clear();
 		this.broker.clear();
+		this.writes.clear();
 		this.unsubscribeSession?.();
 		await this.runtime.dispose();
 		this.unsubscribeRuntimeSessionChange?.();
@@ -812,6 +881,25 @@ export class WebSessionStore {
 				return { ...session, archived: this.metadata.isArchived(session.id), cwdAvailable };
 			}),
 		);
+	}
+
+	/**
+	 * Skills for a workspace without a session yet (a draft). An open session in
+	 * the same folder answers exactly (plugin skills included). Otherwise the
+	 * folder's resources are resolved as a session would (settings, user and
+	 * project skill folders, packages) without extensions and without starting
+	 * anything; only plugin skills, added by an extension, are missing.
+	 */
+	async skillsFor(cwd: string): Promise<WebSkill[]> {
+		const open = [...this.sessions.values()].find((session) => session.cwd === cwd);
+		if (open) return open.skills();
+		const agentDir = resolveStepAgentDir();
+		const configDirName = resolveStepConfigDir();
+		const settingsManager = createStepSettingsManager(cwd, agentDir, { configDirName });
+		if (!settingsManager.getEnableSkillCommands()) return [];
+		const loader = new DefaultResourceLoader({ cwd, agentDir, configDirName, settingsManager, noExtensions: true });
+		await loader.reload();
+		return webSkills(loader.getSkills().skills);
 	}
 
 	async archive(id: string, archived: boolean): Promise<WebSession> {

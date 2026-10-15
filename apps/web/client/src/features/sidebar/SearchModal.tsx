@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent, useEffect, useRef, useState } from 
 import { formatRelativeTime, useT } from "../../i18n";
 import { basename } from "../../lib/format";
 import { useImeGuard } from "../../lib/ime";
+import { skillInvocation } from "../../lib/markdown";
 import { openSession, sessionTitle } from "../../state/session";
 import { useAppStore } from "../../state/store";
 import type { SessionSummary } from "../../state/types";
@@ -33,6 +34,13 @@ function openResult(session: SessionSummary | undefined): void {
 }
 
 /** `#searchModal`: global conversation search (legacy index.html 1159-1202, app.js 1187-1280, 3401-3425). */
+/** First message as shown: a skill invocation reads `name · request`, not the skill's instructions. */
+function skillPreview(text: string | undefined): string {
+	const skill = text ? skillInvocation(text) : null;
+	if (!skill) return text ?? "";
+	return skill.request ? `${skill.name} · ${skill.request}` : skill.name;
+}
+
 export function SearchModal() {
 	const t = useT();
 	const open = useAppStore((state) => state.ui.searchOpen);
@@ -153,7 +161,7 @@ export function SearchModal() {
 									>
 										<span className="search-result-main">
 											<strong>{sessionTitle(session)}</strong>
-											<small>{session.firstMessage || session.allMessagesText || ""}</small>
+											<small>{skillPreview(session.firstMessage) || session.allMessagesText || ""}</small>
 										</span>
 										<time>{formatRelativeTime(session.modified)}</time>
 									</button>

@@ -310,6 +310,33 @@ select {
 	line-height: 1.75;
 	overflow-wrap: anywhere;
 }
+/* lib/markdown: headings carry their own spacing; a blank line in the source is a short gap. */
+.message-body h2,
+.message-body h3,
+.message-body h4 {
+	margin: 14px 0 6px;
+	line-height: 1.45;
+}
+.message-body > h2:first-child,
+.message-body > h3:first-child,
+.message-body > h4:first-child {
+	margin-top: 0;
+}
+.message-body .md-li {
+	position: relative;
+	display: block;
+	padding-left: 1.1em;
+}
+.message-body .md-li::before {
+	position: absolute;
+	left: 0.25em;
+	content: "•";
+	color: var(--ink-3);
+}
+.message-body .md-gap {
+	display: block;
+	height: 10px;
+}
 .message-body code:not(.code-block code) {
 	padding: 2px 5px;
 	border-radius: var(--radius-inline-code);
@@ -348,6 +375,7 @@ select {
 	padding: 12px 14px;
 }
 .code-block code {
+	tab-size: 4;
 	font: 12px / 1.65 var(--mono);
 	white-space: pre;
 }

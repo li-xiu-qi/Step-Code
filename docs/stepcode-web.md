@@ -152,6 +152,44 @@ Both stay out of the way when there is nothing to report — the banner hides un
 the session has run a task or a subagent, and the token control hides until a
 turn reports usage — so neither shows a placeholder figure.
 
+Each finished turn (one user message up to the next) that changed files gets a
+card under its last row: "Edited N files", the summed `+added -removed` lines,
+and the files (three, then "show N more"). The data is the unified patch in the
+tool result `details.patch`: `edit` records one itself; for `write` the Web Host
+extension reads the target on `tool_call` and attaches a patch (plus
+`created`) on `tool_result`, so it is persisted with the session entry and
+survives a reload. Files over 1 MB get no patch, and files changed by `bash`
+are not tracked. Clicking a file opens the preview panel in its changes view
+(turn picker, one row per file, inline diff with line numbers).
+"Undo" calls `POST /api/v1/sessions/{id}/turns/{turnId}/revert`. Each card undoes
+only its own turn: the turn's patches are reverse-applied newest first, and
+nothing is written unless all of them apply. Like `patch -R`, a hunk may have
+moved (later turns added lines elsewhere in the file) and its unchanged context
+lines may have been edited since; only the lines the turn itself changed must be
+intact. Otherwise the request is refused with 409 and a `code` (`conflict` with
+the file's path, `missing`, `busy` while a turn runs, `reverted`), and the card
+tells the user to undo the later turns that touched the file first. Undoing
+turns newest-first therefore always works. Files the turn created are deleted.
+A successful undo appends a `stepcode-web.turn-revert` custom message (in the
+model's context, not a new turn) naming the request and the restored files, so
+the model does not assume its edits are still on disk; the snapshot's
+`revertedTurns` is derived from these entries, so the state follows the branch
+and survives a host restart.
+
+The composer's slash menu opens when the whole prompt is a single `/word`. It
+lists `MCP` and the session's skills, fuzzy-matched with the CLI's scoring (a
+client copy of `packages/tui/src/fuzzy.ts`); arrow keys move, Enter or Tab
+picks, Escape closes. Skills come from `GET /api/v1/sessions/{id}/skills`
+(the session's resource loader, so plugin skills are included); a draft uses
+`GET /api/v1/workspace/skills`, which resolves the folder's skill resources
+without extensions. Picking a skill inserts `/skill:<name> `; the kernel
+expands it into the skill's instructions when the prompt is sent, and the
+conversation shows the skill as a chip above the request. Picking `MCP` shows
+`GET /api/v1/mcp` in place: every server with its state, tool count and start
+error, including servers disabled in `config.toml`. The kernel's own `/mcp`
+command only prints through `notify`, which the Web host does not render. The
+MCP status list is process-wide (written by the session that started last).
+
 Session archive flags are Web Host metadata in `web-sessions.json`; canonical
 conversation history remains the StepCode v3 JSONL file. Deleting a session
 closes the runtime, removes the metadata entry, and removes that session's

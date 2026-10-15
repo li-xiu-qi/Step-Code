@@ -97,6 +97,8 @@ export interface SessionSnapshot extends SessionSummary {
 	/** Tool calls still waiting for a verdict; the stream only announces each one once. */
 	readonly pendingApprovals?: readonly ApprovalRequest[];
 	readonly pendingClarifications?: readonly ClarificationRequest[];
+	/** User entry ids of turns whose file changes were reverted (runtime.ts `revertTurn`). */
+	readonly revertedTurns?: readonly string[];
 }
 
 export interface ClarificationQuestion {
@@ -157,6 +159,13 @@ export interface ToolTimelineItem {
 	/** Full arguments and result, shown when the row is expanded. */
 	readonly inputDetail?: string;
 	readonly outputDetail?: string;
+	/** A successful edit/write: its path argument and the unified patch from the result `details.patch`. */
+	readonly change?: FileChange;
+}
+
+export interface FileChange {
+	readonly path: string;
+	readonly patch: string;
 }
 
 export interface ApprovalTimelineItem {
@@ -220,4 +229,18 @@ export interface Attachment {
 	readonly mimeType: string;
 	readonly data: string;
 	readonly kind: "image" | "text";
+}
+
+/** GET /api/v1/sessions/:id/skills and /api/v1/workspace/skills (runtime.ts `WebSkill`). */
+export interface WebSkill {
+	readonly name: string;
+	readonly description: string;
+}
+
+/** GET /api/v1/mcp (coding-agent `StepMcpStatus`). */
+export interface McpServerStatus {
+	readonly name: string;
+	readonly status: "connecting" | "connected" | "failed" | "disabled";
+	readonly toolCount: number;
+	readonly error?: string;
 }

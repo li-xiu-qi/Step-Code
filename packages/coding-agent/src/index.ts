@@ -624,7 +624,12 @@ export {
 	type StepLoginMethod,
 	type StepLoginStatus,
 } from "./step/login-status.ts";
-export { ambiguousPluginServerNames, resolveStepMcpServer } from "./step/mcp.ts";
+export {
+	ambiguousPluginServerNames,
+	getStepMcpStatuses,
+	resolveStepMcpServer,
+	type StepMcpStatus,
+} from "./step/mcp.ts";
 export { describeStepMcpImportOutcome, runStepMcpImportPrompt } from "./step/mcp-import-prompt.ts";
 export { hasStoredMcpOAuthCredential, loginMcpServer, logoutMcpServer } from "./step/mcp-oauth.ts";
 export { resolveStepLoginProfiles } from "./step/onboarding.ts";
