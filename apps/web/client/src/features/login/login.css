@@ -1,0 +1,254 @@
+/*
+ * Desktop sign-in gate (#loginGate). It covers the whole app with the canvas
+ * colour: nothing behind it is usable until a credential exists.
+ */
+
+.login-gate {
+	position: fixed;
+	inset: 0;
+	z-index: 200;
+	display: grid;
+	place-items: center;
+	overflow: auto;
+	padding: 32px 24px;
+	background: var(--canvas);
+}
+
+.login-card {
+	display: grid;
+	justify-items: center;
+	width: min(400px, 100%);
+	text-align: center;
+}
+
+.login-logo {
+	display: grid;
+	place-items: center;
+	width: 76px;
+	height: 76px;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-dialog);
+	/* Brand tile: stays dark in both themes so the mark keeps its contrast. */
+	background: #15161b;
+	box-shadow: 0 8px 24px var(--shadow);
+}
+
+.login-logo-mark {
+	width: 46px;
+	height: 46px;
+}
+
+.login-title {
+	margin-top: 22px;
+	color: var(--ink);
+	font-size: 30px;
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	line-height: 1.2;
+}
+
+.login-subtitle {
+	margin-top: 8px;
+	color: var(--ink-3);
+	font-size: 14px;
+}
+
+.login-body {
+	display: grid;
+	gap: 12px;
+	width: 100%;
+	margin-top: 36px;
+}
+
+.login-button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	height: 48px;
+	padding: 0 16px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-surface);
+	font: inherit;
+	font-size: 15px;
+	font-weight: 500;
+	cursor: pointer;
+	transition:
+		background var(--fast),
+		opacity var(--fast);
+}
+
+.login-button.primary {
+	background: var(--ink);
+	color: var(--canvas);
+}
+
+.login-button.primary:hover:not(:disabled) {
+	opacity: 0.9;
+}
+
+.login-button.secondary {
+	border-color: var(--line-strong);
+	background: transparent;
+	color: var(--ink);
+}
+
+.login-button.secondary:hover:not(:disabled) {
+	background: var(--hover);
+}
+
+.login-button:disabled {
+	cursor: default;
+	opacity: 0.45;
+}
+
+.login-button-mark {
+	width: 22px;
+	height: 22px;
+	flex: none;
+}
+
+.login-badge {
+	padding: 1px 9px;
+	border: 1px solid currentColor;
+	border-radius: var(--radius-pill);
+	font-size: 12px;
+	opacity: 0.6;
+}
+
+.login-switch {
+	margin-top: 10px;
+	color: var(--ink-3);
+	font-size: 12.5px;
+}
+
+.login-link {
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--ink);
+	font: inherit;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.login-link:hover {
+	text-decoration: underline;
+}
+
+.login-error {
+	color: var(--danger);
+	font-size: 13px;
+	line-height: 1.5;
+}
+
+.login-label {
+	justify-self: start;
+	color: var(--ink);
+	font-size: 15px;
+	font-weight: 600;
+}
+
+.login-select,
+.login-key-field {
+	position: relative;
+	display: flex;
+	align-items: center;
+	height: 48px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-surface);
+	background: var(--surface-soft);
+	transition: border-color var(--fast);
+}
+
+.login-select:focus-within,
+.login-key-field:focus-within {
+	border-color: var(--focus-border);
+}
+
+.login-select {
+	padding-left: 14px;
+}
+
+.login-select-mark {
+	width: 22px;
+	height: 22px;
+	flex: none;
+}
+
+.login-select select {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	padding: 0 40px 0 10px;
+	border: 0;
+	outline: none;
+	appearance: none;
+	background: transparent;
+	color: var(--ink);
+	font: inherit;
+	font-size: 15px;
+	cursor: pointer;
+}
+
+.login-select-chevron {
+	position: absolute;
+	right: 14px;
+	color: var(--ink-3);
+	pointer-events: none;
+}
+
+.login-key-field {
+	padding: 0 6px 0 14px;
+}
+
+.login-key-field input {
+	flex: 1;
+	min-width: 0;
+	height: 100%;
+	border: 0;
+	outline: none;
+	background: transparent;
+	color: var(--ink);
+	font: inherit;
+	font-size: 15px;
+}
+
+.login-key-field input::placeholder {
+	color: var(--ink-3);
+}
+
+.login-key-link {
+	flex: none;
+	height: 36px;
+	padding: 0 10px;
+	border: 0;
+	border-radius: var(--radius-input);
+	background: none;
+	color: var(--ink);
+	font: inherit;
+	font-size: 14px;
+	font-weight: 600;
+	cursor: pointer;
+}
+
+.login-key-link:hover:not(:disabled) {
+	background: var(--hover);
+}
+
+.login-waiting {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 10px;
+	color: var(--ink);
+	font-size: 15px;
+	font-weight: 500;
+}
+
+.login-hint {
+	margin-bottom: 8px;
+	color: var(--ink-3);
+	font-size: 13px;
+	line-height: 1.6;
+}

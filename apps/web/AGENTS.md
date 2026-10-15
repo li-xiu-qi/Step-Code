@@ -46,7 +46,7 @@ apps/web/
     approval.ts          ApprovalBroker: pending tool approvals per session
     workspaces.ts        workspace registry (newest first)
     files.ts             workspace file tree / read / search
-    auth.ts, login.ts    cookie secret, launch-token exchange, credential status
+    auth.ts, login.ts    cookie secret, launch-token exchange, credential status, desktop sign-in
     directory-picker.ts  server-side folder chooser
     attachments.ts, feedback.ts, banner.ts, bootstrap.ts, writer-lease.ts
   client/
@@ -62,7 +62,7 @@ apps/web/
       styles/global.css  design tokens (light/dark), reset, app grid, shared rules, [data-host] rules
       ui/                reusable primitives, one folder each (Component.tsx + Component.module.css), barrel index.ts
       features/<name>/   index.tsx (public slots), actions.ts (state changes), *.tsx, <name>.css
-        composer conversation files market shell sidebar workspace
+        composer conversation files login market shell sidebar workspace
   test/
     *.test.ts            host unit tests (node:test)
     e2e/web.e2e.mjs      builds the client, starts the host, drives headless Chrome

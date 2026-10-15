@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { buildLoginReport } from "../src/login.ts";
+import { buildLoginReport, loginMethods, WebLoginController } from "../src/login.ts";
 
 const authPath = "/home/me/.stepcode/auth.json";
 const planCredential = JSON.stringify({
@@ -119,4 +119,97 @@ test("a plain API-key credential is recognised without a profile", () => {
 		loginCommand: "step login",
 	});
 	assert.equal(JSON.stringify(report).includes("sk-not-echoed"), false);
+});
+
+test("the desktop dialog offers the four step login profiles, split by region", () => {
+	const methods = loginMethods({});
+	assert.deepEqual(
+		methods.map((method) => [method.id, method.credentialSource, method.region]),
+		[
+			["step_plan", "browser", "cn"],
+			["step_plan_oversea", "browser", "global"],
+			["platform_cn", "apiKey", "cn"],
+			["platform_oversea", "apiKey", "global"],
+		],
+	);
+	assert.equal(methods.find((method) => method.id === "platform_cn")?.keyPageUrl, "https://platform.stepfun.com/interface-key");
+	assert.equal(
+		methods.find((method) => method.id === "platform_oversea")?.keyPageUrl,
+		"https://platform.stepfun.ai/interface-key",
+	);
+});
+
+test("an API key sign-in reports the verdict and drops the cached report only on success", async () => {
+	let saved = 0;
+	const verdicts = ["invalid", "unavailable", "valid"] as const;
+	const calls: string[] = [];
+	const controller = new WebLoginController({
+		authPath: () => authPath,
+		onSaved: () => saved++,
+		loginWithApiKey: async (input) => {
+			calls.push(`${input.profile}:${input.apiKey}:${input.authPath}`);
+			return { validity: verdicts[calls.length - 1] ?? "valid" };
+		},
+	});
+	assert.equal(controller.isApiKeyMethod("platform_cn"), true);
+	assert.equal(controller.isApiKeyMethod("step_plan"), false);
+	assert.deepEqual(await controller.withApiKey("platform_cn", "sk-1"), {
+		ok: false,
+		code: "invalid_key",
+		error: "The API key was rejected",
+	});
+	assert.equal((await controller.withApiKey("platform_cn", "sk-1")).ok, false);
+	assert.equal(saved, 0);
+	assert.deepEqual(await controller.withApiKey("platform_oversea", "sk-2"), { ok: true });
+	assert.equal(saved, 1);
+	assert.deepEqual(calls.at(-1), `platform_oversea:sk-2:${authPath}`);
+});
+
+test("a browser sign-in answers with the authorize URL, completes in the background, and can be cancelled", async () => {
+	let saved = 0;
+	let finish!: () => void;
+	const controller = new WebLoginController({
+		authPath: () => authPath,
+		onSaved: () => saved++,
+		loginInBrowser: (input) => {
+			input.onAuthUrl(`https://platform.stepfun.com/cli-login-remote?profile=${input.profile}`);
+			return new Promise<void>((resolve, reject) => {
+				finish = resolve;
+				input.signal.addEventListener("abort", () => reject(new Error("aborted")));
+			});
+		},
+	});
+	assert.equal(controller.isBrowserMethod("step_plan"), true);
+	assert.equal(controller.isBrowserMethod("platform_cn"), false);
+	const started = await controller.startBrowser("step_plan");
+	assert.deepEqual(started, {
+		state: "pending",
+		profile: "step_plan",
+		authUrl: "https://platform.stepfun.com/cli-login-remote?profile=step_plan",
+	});
+	finish();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(controller.browserState(), { state: "completed", profile: "step_plan" });
+	assert.equal(saved, 1);
+
+	await controller.startBrowser("step_plan_oversea");
+	controller.cancelBrowser();
+	await new Promise((resolve) => setImmediate(resolve));
+	assert.deepEqual(controller.browserState(), { state: "idle" });
+	assert.equal(saved, 1);
+});
+
+test("a browser sign-in that fails before a URL reports the failure", async () => {
+	const controller = new WebLoginController({
+		authPath: () => authPath,
+		onSaved: () => {},
+		loginInBrowser: async () => {
+			throw new Error("init failed");
+		},
+	});
+	assert.deepEqual(await controller.startBrowser("step_plan"), {
+		state: "failed",
+		profile: "step_plan",
+		error: "init failed",
+	});
 });

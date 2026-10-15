@@ -23,7 +23,7 @@ import {
 	readWorkspaceFile,
 	searchWorkspaceFiles,
 } from "./files.ts";
-import { buildLoginReport, type LoginReport } from "./login.ts";
+import { buildLoginReport, type LoginReport, loginMethods, WebLoginController } from "./login.ts";
 import {
 	classifyAttachment,
 	defaultWorkspace,
@@ -222,6 +222,29 @@ async function loginReport(): Promise<LoginReport> {
 	return loginCache.value;
 }
 
+/**
+ * Sign-in from the page. A saved credential invalidates the cached report and
+ * the open sessions, which were built without it.
+ */
+const login = new WebLoginController({
+	authPath: () => getStepAuthPath(),
+	onSaved: () => {
+		loginCache = undefined;
+		void store.reloadCredentials();
+	},
+});
+
+async function signInWithApiKey(request: IncomingMessage, response: ServerResponse): Promise<void> {
+	const input = await body(request);
+	if (!login.isApiKeyMethod(input.profile)) return error(response, 400, "Unknown API key login profile");
+	if (typeof input.apiKey !== "string" || !input.apiKey.trim()) return error(response, 400, "apiKey is required");
+	const result = await login.withApiKey(input.profile, input.apiKey);
+	if (!result.ok) {
+		return json(response, result.code === "invalid_key" ? 400 : 502, { error: result.error, code: result.code });
+	}
+	return json(response, 200, { login: await loginReport() });
+}
+
 async function pickWorkspaceFolder(request: IncomingMessage, response: ServerResponse): Promise<void> {
 	if (directoryPicker !== "native") return error(response, 409, "The system folder picker is not available");
 	if (pickerOpen) return error(response, 409, "A folder picker is already open");
@@ -296,6 +319,24 @@ const server = createServer(async (request, response) => {
 		if (parts[2] === "login" && parts.length === 3 && method === "GET") {
 			return json(response, 200, await loginReport());
 		}
+		if (parts[2] === "login" && parts.length === 4) {
+			if (parts[3] === "methods" && method === "GET") return json(response, 200, { methods: loginMethods() });
+			if (parts[3] === "api-key" && method === "POST") return signInWithApiKey(request, response);
+			if (parts[3] === "browser") {
+				if (method === "GET") return json(response, 200, login.browserState());
+				if (method === "DELETE") {
+					login.cancelBrowser();
+					return json(response, 200, { ok: true });
+				}
+				if (method === "POST") {
+					const input = await body(request);
+					if (!login.isBrowserMethod(input.profile)) return error(response, 400, "Unknown browser login profile");
+					const state = await login.startBrowser(input.profile);
+					if (state.state === "failed") return json(response, 502, { error: state.error, code: "failed" });
+					return json(response, 200, state);
+				}
+			}
+		}
 		if (parts[2] === "workspaces" && parts[3] === "pick" && parts.length === 4 && method === "POST") {
 			return pickWorkspaceFolder(request, response);
 		}
@@ -365,7 +406,13 @@ const server = createServer(async (request, response) => {
 					const eventName = event.type === "error" ? "web_error" : event.type;
 					response.write(`event: ${eventName}\ndata: ${JSON.stringify(event)}\n\n`);
 				});
-				response.on("close", unsubscribe);
+				// A closed session (e.g. rebuilt after sign-in) sends nothing more; end
+				// the stream so the page's EventSource reconnects to its replacement.
+				const stopOnClose = session.onClose(() => response.end());
+				response.on("close", () => {
+					unsubscribe();
+					stopOnClose();
+				});
 				return;
 			}
 			if (parts[4] === "messages" && method === "POST") {

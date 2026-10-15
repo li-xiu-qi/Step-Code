@@ -19,9 +19,11 @@ SameSite cookie. API requests require the cookie and a local Origin. The
 server binds to `127.0.0.1` by default. Logging out expires the browser cookie;
 re-entry requires a fresh terminal launch link.
 
-StepCode Web has no login of its own. Signing in is a terminal action —
-`step login` writes `~/.stepcode/auth.json` — and the Host reuses that credential
-exactly as the CLI does:
+The credential lives in `~/.stepcode/auth.json` (`STEPCODE_AUTH_PATH` overrides
+it). It is written by `step login` in a terminal or by the sign-in dialog of
+Web and Desktop (see "Sign-in dialog" below), in the same shape, so CLI, Web and
+Desktop share one sign-in, and the Host reuses that credential exactly as the
+CLI does:
 
 - It calls `syncStepLoginProfileEndpoint` before building the ModelRuntime, so the
   credential is sent to the region its stored profile names. The CLI does the
@@ -50,6 +52,45 @@ Presence and reachability are reported separately: `getStepLoginStatus` treats a
 unreachable provider as "not logged in", but the credential is still on disk and
 the next request may succeed, so `configured` reflects the stored credential and
 `validity` reports what the provider said (`valid`, `invalid`, `unavailable`).
+
+### Sign-in dialog
+
+When the bootstrap report says `configured: false` (no `auth.json`, an empty
+one, or no `step` entry, and no `STEP_API_KEY`), bootstrap stops before it opens
+any session and shows `#loginGate`, a dialog with no close control; Escape and
+global shortcuts are ignored while it is open. Web and Desktop both show it.
+
+A session fixes its model catalog and provider endpoint when it is built, so
+one opened before the credential existed (another tab, or a page loaded before
+the dialog) would stay on the `unknown` model and fail with "No API key found
+for the selected model". After a credential is saved the Host therefore releases
+every idle open session (`WebSessionStore.reloadCredentials`): its SSE streams
+end, the page's EventSource reconnects, and the next request rebuilds it from
+its file with the new credential. A session without a file yet (no message
+sent) is recreated under the same id. Sessions in a running turn are left
+alone.
+
+The dialog offers the four `step login` profiles, split by region
+(`GET /api/v1/login/methods`):
+
+| Region | Step Plan (browser) | API key |
+| --- | --- | --- |
+| China (default) | `step_plan` | `platform_cn`, key page `platform.stepfun.com/interface-key` |
+| International | `step_plan_oversea` | `platform_oversea`, key page `platform.stepfun.ai/interface-key` |
+
+- **Step Plan**: `POST /api/v1/login/browser` runs the kernel's
+  `loginStepInBrowser`, the same cloud flow as `step login`, and answers with the
+  authorize URL, which the client opens in the system browser. The client polls
+  `GET /api/v1/login/browser` until `completed` or `failed`; Cancel sends
+  `DELETE`, which aborts the wait so a later approval writes nothing.
+- **API key**: `POST /api/v1/login/api-key` runs `loginStepWithApiKey`, which
+  calls `GET <profile base>/v1/models` with the key and saves it only on 2xx. A
+  401/403 is reported as `invalid_key`; any other failure as `unavailable`, and
+  nothing is saved.
+
+Without a stored choice, Desktop starts in the system language
+(`navigator.language`: `zh*` is Chinese, anything else English); the browser
+keeps its zh-CN default.
 
 The approval path is an adapter: Step extensions call
 `ExtensionUIContext.confirm`, the Web Host's approval broker emits an SSE

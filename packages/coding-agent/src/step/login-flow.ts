@@ -9,6 +9,7 @@ import {
 import { detectTerminalBackgroundFromEnv, initTheme, resolveThemeSetting, theme } from "../theme/theme.ts";
 import { openBrowser } from "../utils/open-browser.ts";
 import { resolveStepAgentDir } from "./environment.ts";
+import { type StepApiKeyValidation, validateStepApiKey } from "./login-status.ts";
 import {
 	INITIAL_STEP_LOGIN_STEP,
 	isStepLoginSettled,
@@ -159,6 +160,113 @@ export function syncStepLoginProfileEndpoint(
 	env.STEP_LOGIN_PROFILE_AUTH_URL = profile.authBaseUrl;
 }
 
+/** The cloud sign-in shared by `step login` and hosts without a terminal. */
+async function requestStepBrowserCredential(
+	profile: StepLoginProfile,
+	options: {
+		readonly signal: AbortSignal;
+		readonly env?: Record<string, string | undefined>;
+		readonly onAuthUrl: (url: string) => void;
+	},
+): Promise<{ readonly access: string; readonly uid?: unknown }> {
+	return loginStepOAuth(
+		{
+			signal: options.signal,
+			onAuth: ({ url }) => options.onAuthUrl(url),
+			onDeviceCode: () => {},
+			// Cloud login never prompts for a callback URL or opens a local port.
+			onPrompt: async () => "",
+			onSelect: async () => undefined,
+		},
+		{
+			apiBaseUrl: profile.baseUrl,
+			authBaseUrl: profile.authBaseUrl,
+			env: options.env ?? process.env,
+			loginProfile: profile.id,
+			client: defaultStepCliClientInfo(resolveStepCodeVersion(options.env).value),
+		},
+	);
+}
+
+function requireStepLoginProfile(
+	id: StepLoginProfileId,
+	source: StepLoginProfile["credentialSource"],
+	env?: Record<string, string | undefined>,
+): StepLoginProfile {
+	const profile = resolveStepLoginProfiles(env).find((candidate) => candidate.id === id);
+	if (!profile || profile.credentialSource !== source) throw new Error(`Unknown Step login profile: ${id}`);
+	return profile;
+}
+
+export interface StepHeadlessLoginOptions {
+	readonly authPath: string;
+	readonly env?: Record<string, string | undefined>;
+	readonly now?: () => Date;
+}
+
+/**
+ * Sign in with a platform API key without a terminal (StepCode Desktop).
+ *
+ * The key is checked against the profile's endpoint first and written only when
+ * the provider accepts it, in the same shape `step login` writes, so the CLI
+ * and the desktop app read one credential.
+ */
+export async function loginStepWithApiKey(
+	input: StepHeadlessLoginOptions & {
+		readonly profile: StepLoginProfileId;
+		readonly apiKey: string;
+		readonly fetch?: typeof fetch;
+		readonly signal?: AbortSignal;
+	},
+): Promise<StepApiKeyValidation> {
+	const profile = requireStepLoginProfile(input.profile, "apiKey", input.env);
+	const apiKey = input.apiKey.trim();
+	if (!apiKey) throw new Error("API key cannot be empty");
+	const result = await validateStepApiKey({
+		apiKey,
+		baseUrl: profile.baseUrl,
+		fetch: input.fetch,
+		signal: input.signal,
+	});
+	if (result.validity !== "valid") return result;
+	await writeStepLoginCredential({
+		authPath: input.authPath,
+		profile: profile.id,
+		apiKey,
+		obtainedAt: (input.now ?? (() => new Date()))().toISOString(),
+	});
+	syncStepLoginProfileEndpoint(input.authPath, input.env ?? process.env);
+	return result;
+}
+
+/**
+ * Run the Step Plan browser sign-in without a terminal (StepCode Desktop).
+ *
+ * `onAuthUrl` receives the same authorize URL `step login` opens; the caller
+ * decides how to show it. Resolves once the browser approval arrives and the
+ * credential is saved; rejects on timeout, failure, or abort.
+ */
+export async function loginStepInBrowser(
+	input: StepHeadlessLoginOptions & {
+		readonly profile: StepLoginProfileId;
+		readonly signal: AbortSignal;
+		readonly onAuthUrl: (url: string) => void;
+	},
+): Promise<void> {
+	const profile = requireStepLoginProfile(input.profile, "browser", input.env);
+	const credential = await requestStepBrowserCredential(profile, input);
+	input.signal.throwIfAborted();
+	const uid = typeof credential.uid === "string" ? credential.uid : undefined;
+	await writeStepLoginCredential({
+		authPath: input.authPath,
+		profile: profile.id,
+		apiKey: credential.access,
+		...(uid ? { uid } : {}),
+		obtainedAt: (input.now ?? (() => new Date()))().toISOString(),
+	});
+	syncStepLoginProfileEndpoint(input.authPath, input.env ?? process.env);
+}
+
 export async function runStepLogin(options: RunStepLoginOptions = {}): Promise<StepLoginOutcome> {
 	const authPath = options.authPath ?? "auth.json";
 	const profiles = resolveStepLoginProfiles(options.env);
@@ -231,28 +339,16 @@ export async function runStepLogin(options: RunStepLoginOptions = {}): Promise<S
 		const controller = new AbortController();
 		browserAbort = controller;
 		try {
-			const credential = await loginStepOAuth(
-				{
-					signal: controller.signal,
-					onAuth: ({ url }) => {
-						// Show the URL before launching anything: if the launcher hangs or
-						// the host has no browser, the user still has something to copy.
-						dispatch({ type: "browserOpened", authUrl: url });
-						if (!options.noBrowser) openBrowser(url);
-					},
-					onDeviceCode: () => {},
-					// Cloud login never prompts for a callback URL or opens a local port.
-					onPrompt: async () => "",
-					onSelect: async () => undefined,
+			const credential = await requestStepBrowserCredential(profile, {
+				signal: controller.signal,
+				env: options.env,
+				onAuthUrl: (url) => {
+					// Show the URL before launching anything: if the launcher hangs or
+					// the host has no browser, the user still has something to copy.
+					dispatch({ type: "browserOpened", authUrl: url });
+					if (!options.noBrowser) openBrowser(url);
 				},
-				{
-					apiBaseUrl: profile.baseUrl,
-					authBaseUrl: profile.authBaseUrl,
-					env: options.env ?? process.env,
-					loginProfile: choice,
-					client: defaultStepCliClientInfo(resolveStepCodeVersion(options.env).value),
-				},
-			);
+			});
 			dispatch({
 				type: "credential",
 				apiKey: credential.access,

@@ -1,6 +1,7 @@
 import { useRef, useSyncExternalStore } from "react";
 import type { Locale, TagColor } from "../i18n/messages";
 import { readStorage, STORAGE_KEYS } from "../lib/storage";
+import { isDesktopHost } from "../platform/host";
 import type {
 	Attachment,
 	DirectoryListing,
@@ -154,6 +155,8 @@ export interface UiState {
 	readonly authExpired: boolean;
 	/** `#loggedOutOverlay` visible. */
 	readonly loggedOut: boolean;
+	/** `#loginGate` visible: Desktop has no Step credential yet, and the app waits behind it. */
+	readonly loginRequired: boolean;
 	/** Incremented to ask the composer to focus `#prompt` (legacy `$("#prompt").focus()`). */
 	readonly promptFocusRequest: number;
 	/** Mid-pane view covering the conversation: `#cronView` or `#marketView` (`.market-view.open`). */
@@ -240,8 +243,17 @@ function initialTheme(): ThemeChoice {
 	return stored === "light" || stored === "dark" ? stored : "system";
 }
 
+/**
+ * A stored choice wins. Without one, Desktop follows the operating system's
+ * language (Chromium reports it as `navigator.language`): Chinese stays
+ * Chinese, anything else is English. A plain browser keeps the zh-CN default.
+ */
 function initialLocale(): Locale {
-	return readStorage(STORAGE_KEYS.locale) === "en-US" ? "en-US" : "zh-CN";
+	const stored = readStorage(STORAGE_KEYS.locale);
+	if (stored === "en-US" || stored === "zh-CN") return stored;
+	if (!isDesktopHost() || typeof navigator === "undefined") return "zh-CN";
+	const system = navigator.languages?.[0] ?? navigator.language ?? "";
+	return system.toLowerCase().startsWith("zh") ? "zh-CN" : "en-US";
 }
 
 export function createInitialState(): AppState {
@@ -300,6 +312,7 @@ export function createInitialState(): AppState {
 			tagPicker: null,
 			authExpired: false,
 			loggedOut: false,
+			loginRequired: false,
 			promptFocusRequest: 0,
 			midView: null,
 			changesMenu: null,
