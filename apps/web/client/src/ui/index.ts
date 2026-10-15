@@ -11,6 +11,7 @@
 
 export { Button, type ButtonProps, type ButtonVariant } from "./Button/Button";
 export { ContextMenu, type ContextMenuProps } from "./ContextMenu/ContextMenu";
+export { DiffStat, type DiffStatProps } from "./DiffStat/DiffStat";
 export { EmptyState } from "./EmptyState/EmptyState";
 export { type DismissEvent, type DismissOptions, useDismiss } from "./hooks/useDismiss";
 export { useMergedRef } from "./hooks/useMergedRef";
@@ -30,5 +31,6 @@ export {
 	type SegmentedControlProps,
 	type SegmentedItem,
 } from "./SegmentedControl/SegmentedControl";
+export { ShimmerText } from "./ShimmerText/ShimmerText";
 export { Spinner } from "./Spinner/Spinner";
 export { Toast, type ToastProps, type ToastTone } from "./Toast/Toast";

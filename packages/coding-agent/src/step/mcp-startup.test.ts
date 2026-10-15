@@ -254,6 +254,17 @@ test("a missing header environment variable fails the server instead of sending 
 		expect.stringContaining("MCP header environment variable 'STEP_TEST_ABSENT_HEADER' for 'X-Api-Key' is missing"),
 		"warning",
 	);
+	// Hosts without a notification surface (the Web host) read the reason from the status.
+	expect(getStepMcpStatuses()[0]?.error).toContain("STEP_TEST_ABSENT_HEADER");
+	expect(harness.extension.tools.size).toBe(0);
+});
+
+test("a server disabled in config.toml is listed as disabled and never started", async () => {
+	const server = await slowServer();
+	config.value = { mcp_servers: { off: { url: server.url, enabled: false } } };
+	const harness = await setup("rpc");
+	await harness.start();
+	expect(getStepMcpStatuses()).toEqual([{ name: "off", status: "disabled", toolCount: 0 }]);
 	expect(harness.extension.tools.size).toBe(0);
 });
 

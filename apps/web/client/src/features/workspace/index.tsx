@@ -6,5 +6,6 @@
 
 import "./workspace.css";
 
+export { RemoveWorkspaceModal } from "./RemoveWorkspaceModal";
 export { WorkspaceBrowserModal } from "./WorkspaceBrowserModal";
 export { WorkspaceControl } from "./WorkspaceControl";

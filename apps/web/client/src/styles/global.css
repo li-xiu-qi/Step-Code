@@ -11,184 +11,184 @@
 
 /* legacy 1-116: tokens and dark theme */
 :root {
-	--canvas: #ffffff;
-	--sidebar: #f7f7f8;
-	--surface: #ffffff;
-	--surface-soft: #f5f5f6;
-	--hover: #ededee;
-	--selected: #e9e9ea;
-	--line: #e2e2e3;
-	--line-strong: #cfcfd1;
-	--ink: #171718;
-	--ink-2: #66666a;
-	--ink-3: #96969b;
-	--danger: #c7473c;
-	--attention: #d49a22;
-	--success: #3d9950;
-	--danger-surface: #fff0ee;
-	--attention-surface: #fff7df;
-	--code-surface: #f7f7f8;
-	--shadow: rgb(0 0 0 / 12%);
-	--sans:
-		-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
-	--mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-	--sidebar-width: 260px;
-	--composer-width: 760px;
-	/* Horizontal inset shared by the message column and the composer, so their
+  --canvas: #ffffff;
+  --sidebar: #f7f7f8;
+  --surface: #ffffff;
+  --surface-soft: #f5f5f6;
+  --hover: #ededee;
+  --selected: #e9e9ea;
+  --line: #e2e2e3;
+  --line-strong: #cfcfd1;
+  --ink: #171718;
+  --ink-2: #66666a;
+  --ink-3: #96969b;
+  --danger: #c7473c;
+  --attention: #d49a22;
+  --success: #3d9950;
+  --danger-surface: #fff0ee;
+  --attention-surface: #fff7df;
+  --code-surface: #f7f7f8;
+  --shadow: rgb(0 0 0 / 12%);
+  --sans:
+    "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  --sidebar-width: 260px;
+  --composer-width: 760px;
+  /* Horizontal inset shared by the message column and the composer, so their
      left edges line up instead of drifting apart by a few pixels. */
-	--gutter: 32px;
-	--radius-control: 8px;
-	--radius-card: 20px;
-	--fast: 120ms;
+  --gutter: 32px;
+  --radius-control: 8px;
+  --radius-card: 20px;
+  --fast: 120ms;
 
-	/* ── Control metrics ─────────────────────────────────────────────── */
-	--control-h: 32px; /* default control (control-select) */
-	--control-pad-x: 9px; /* horizontal padding inside a control */
-	--control-select-max-w: 180px;
-	--control-h-md: 34px; /* inputs, code-block header, list heading */
-	--control-h-sm: 30px; /* icon button, stop button, brand mark */
-	--control-h-lg: 36px; /* send button, list row */
-	--control-h-xs: 22px; /* inline row buttons */
-	--input-h: 28px; /* tag create input */
-	--brand-row-h: 64px;
-	--textarea-min-h: 64px;
-	--textarea-max-h: 320px; /* read by resizePrompt(), not by CSS */
-	--textarea-pad-x: 7px;
-	/* ── Icon sizes ──────────────────────────────────────────────────── */
-	--icon-2xs: 10px; /* chevrons and the tool marker */
-	--icon-xs: 14px; /* inline and menu icons */
-	--icon-sm: 15px; /* compact toolbar icons */
-	--icon-md: 18px; /* default: sidebar, composer, dialogs */
-	--icon-lg: 20px; /* dialog close buttons */
-	/* ── Radius ramp ─────────────────────────────────────────────────── */
-	--radius-hairline: 1px;
-	--radius-spine: 2px;
-	--radius-inline-code: 4px;
-	--radius-tiny: 5px;
-	--radius-chip: 6px;
-	--radius-input: 7px;
-	--radius-row: 9px;
-	--radius-panel: 10px;
-	--radius-menu: 11px;
-	--radius-surface: 12px;
-	--radius-overlay: 14px;
-	--radius-search: 15px;
-	--radius-bubble: 16px;
-	--radius-dialog: 18px;
-	--radius-pill: 999px;
-	/* ── Chrome ──────────────────────────────────────────────────────── */
-	--scrollbar-size: 8px;
-	--scrollbar-thumb: #ceced1;
-	--selection: #dedee0;
-	/* Status badges and the shared focus ring. */
-	--badge-surface: #eeeeef;
-	--attention-ink: #9a6b12;
-	--focus-border: #9d9da1;
-	--accent: #1677ff;
-	--accent-ring: rgb(22 119 255 / 12%);
-	/* ── Source preview tokens ───────────────────────────────────────── */
-	--tok-comment: #7d8590;
-	--tok-string: #1a7f37;
-	--tok-number: #0550ae;
-	--tok-keyword: #a626a4;
-	--tok-key: #b0442e;
-	--tok-tag: #0b63c5;
+  /* ── Control metrics ─────────────────────────────────────────────── */
+  --control-h: 32px; /* default control (control-select) */
+  --control-pad-x: 9px; /* horizontal padding inside a control */
+  --control-select-max-w: 180px;
+  --control-h-md: 34px; /* inputs, code-block header, list heading */
+  --control-h-sm: 30px; /* icon button, stop button, brand mark */
+  --control-h-lg: 36px; /* send button, list row */
+  --control-h-xs: 22px; /* inline row buttons */
+  --input-h: 28px; /* tag create input */
+  --brand-row-h: 64px;
+  --textarea-min-h: 64px;
+  --textarea-max-h: 320px; /* read by resizePrompt(), not by CSS */
+  --textarea-pad-x: 7px;
+  /* ── Icon sizes ──────────────────────────────────────────────────── */
+  --icon-2xs: 10px; /* chevrons and the tool marker */
+  --icon-xs: 14px; /* inline and menu icons */
+  --icon-sm: 15px; /* compact toolbar icons */
+  --icon-md: 18px; /* default: sidebar, composer, dialogs */
+  --icon-lg: 20px; /* dialog close buttons */
+  /* ── Radius ramp ─────────────────────────────────────────────────── */
+  --radius-hairline: 1px;
+  --radius-spine: 2px;
+  --radius-inline-code: 4px;
+  --radius-tiny: 5px;
+  --radius-chip: 6px;
+  --radius-input: 7px;
+  --radius-row: 9px;
+  --radius-panel: 10px;
+  --radius-menu: 11px;
+  --radius-surface: 12px;
+  --radius-overlay: 14px;
+  --radius-search: 15px;
+  --radius-bubble: 16px;
+  --radius-dialog: 18px;
+  --radius-pill: 999px;
+  /* ── Chrome ──────────────────────────────────────────────────────── */
+  --scrollbar-size: 8px;
+  --scrollbar-thumb: #ceced1;
+  --selection: #dedee0;
+  /* Status badges and the shared focus ring. */
+  --badge-surface: #eeeeef;
+  --attention-ink: #9a6b12;
+  --focus-border: #9d9da1;
+  --accent: #1677ff;
+  --accent-ring: rgb(22 119 255 / 12%);
+  /* ── Source preview tokens ───────────────────────────────────────── */
+  --tok-comment: #7d8590;
+  --tok-string: #1a7f37;
+  --tok-number: #0550ae;
+  --tok-keyword: #a626a4;
+  --tok-key: #b0442e;
+  --tok-tag: #0b63c5;
 }
 
 html[data-theme="dark"] {
-	color-scheme: dark;
-	--canvas: #181819;
-	--sidebar: #202022;
-	--surface: #272729;
-	--surface-soft: #303033;
-	--hover: #353538;
-	--selected: #3b3b3f;
-	--line: #3b3b3e;
-	--line-strong: #55555a;
-	--ink: #f1f1f2;
-	--ink-2: #b8b8bd;
-	--ink-3: #85858b;
-	--danger: #ef7468;
-	--attention: #e6b44c;
-	--success: #64bb75;
-	--danger-surface: #3d2726;
-	--attention-surface: #3a3323;
-	--code-surface: #222224;
-	--shadow: rgb(0 0 0 / 38%);
-	--scrollbar-thumb: #4a4a4f;
-	--selection: #3d3d42;
-	--badge-surface: #3b3b3f;
-	--attention-ink: #e6b44c;
-	--focus-border: #6a6a70;
-	--tok-comment: #8b949e;
-	--tok-string: #7ee787;
-	--tok-number: #79c0ff;
-	--tok-keyword: #d2a8ff;
-	--tok-key: #ffa198;
-	--tok-tag: #79c0ff;
+  color-scheme: dark;
+  --canvas: #181819;
+  --sidebar: #202022;
+  --surface: #272729;
+  --surface-soft: #303033;
+  --hover: #353538;
+  --selected: #3b3b3f;
+  --line: #3b3b3e;
+  --line-strong: #55555a;
+  --ink: #f1f1f2;
+  --ink-2: #b8b8bd;
+  --ink-3: #85858b;
+  --danger: #ef7468;
+  --attention: #e6b44c;
+  --success: #64bb75;
+  --danger-surface: #3d2726;
+  --attention-surface: #3a3323;
+  --code-surface: #222224;
+  --shadow: rgb(0 0 0 / 38%);
+  --scrollbar-thumb: #4a4a4f;
+  --selection: #3d3d42;
+  --badge-surface: #3b3b3f;
+  --attention-ink: #e6b44c;
+  --focus-border: #6a6a70;
+  --tok-comment: #8b949e;
+  --tok-string: #7ee787;
+  --tok-number: #79c0ff;
+  --tok-keyword: #d2a8ff;
+  --tok-key: #ffa198;
+  --tok-tag: #79c0ff;
 }
 
 /* legacy 118-155: reset, focus ring, scrollbars, icon sizing */
 * {
-	box-sizing: border-box;
-	margin: 0;
-	padding: 0;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 /* Overlays stay mounted and toggle `hidden`; it must beat any component `display`. */
 [hidden] {
-	/* biome-ignore lint/complexity/noImportantStyles: legacy contract, see above. */
-	display: none !important;
+  /* biome-ignore lint/complexity/noImportantStyles: legacy contract, see above. */
+  display: none !important;
 }
 html,
 body {
-	width: 100%;
-	height: 100%;
+  width: 100%;
+  height: 100%;
 }
 body {
-	overflow: hidden;
-	background: var(--canvas);
-	color: var(--ink);
-	font-family: var(--sans);
-	font-size: 14px;
-	line-height: 1.6;
-	-webkit-font-smoothing: antialiased;
+  overflow: hidden;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 button,
 input,
 textarea,
 select {
-	font: inherit;
-	color: inherit;
+  font: inherit;
+  color: inherit;
 }
 button {
-	border: 0;
-	background: none;
-	cursor: pointer;
+  border: 0;
+  background: none;
+  cursor: pointer;
 }
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 [role="button"]:focus-visible {
-	outline: 2px solid var(--ink);
-	outline-offset: 2px;
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
 select {
-	appearance: none;
+  appearance: none;
 }
 ::selection {
-	background: var(--selection);
+  background: var(--selection);
 }
 ::-webkit-scrollbar {
-	width: var(--scrollbar-size);
-	height: var(--scrollbar-size);
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 ::-webkit-scrollbar-thumb {
-	border-radius: var(--radius-control);
-	background: var(--scrollbar-thumb);
+  border-radius: var(--radius-control);
+  background: var(--scrollbar-thumb);
 }
 ::-webkit-scrollbar-track {
-	background: transparent;
+  background: transparent;
 }
 
 /*
@@ -197,185 +197,213 @@ select {
  * the one non-square icon: a directional chevron in the user menu.
  */
 .icon {
-	flex: none;
+  flex: none;
 }
 .icon--2xs {
-	width: var(--icon-2xs);
-	height: var(--icon-2xs);
+  width: var(--icon-2xs);
+  height: var(--icon-2xs);
 }
 .icon--xs {
-	width: var(--icon-xs);
-	height: var(--icon-xs);
+  width: var(--icon-xs);
+  height: var(--icon-xs);
 }
 .icon--sm {
-	width: var(--icon-sm);
-	height: var(--icon-sm);
+  width: var(--icon-sm);
+  height: var(--icon-sm);
 }
 .icon--md {
-	width: var(--icon-md);
-	height: var(--icon-md);
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 .icon--lg {
-	width: var(--icon-lg);
-	height: var(--icon-lg);
+  width: var(--icon-lg);
+  height: var(--icon-lg);
 }
 .icon--menu {
-	width: 8px;
-	height: 12px;
+  width: 8px;
+  height: 12px;
 }
 /* Hidden but not `display: none`, which would stop <use> from resolving. */
 .icon-sprite {
-	position: absolute;
-	width: 0;
-	height: 0;
-	overflow: hidden;
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
 }
 
 /* legacy 157-166: app grid */
 .app {
-	position: relative;
-	display: grid;
-	grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-	width: 100vw;
-	height: 100vh;
-	transition: grid-template-columns 0.18s ease;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  width: 100vw;
+  height: 100vh;
+  transition: grid-template-columns 0.18s ease;
 }
 .app.sidebar-hidden {
-	grid-template-columns: 0 minmax(0, 1fr);
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 @keyframes pulse {
-	0%,
-	100% {
-		opacity: 0.28;
-		transform: scale(0.75);
-	}
-	50% {
-		opacity: 1;
-		transform: scale(1.1);
-	}
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: scale(0.75);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
 }
 
 /* legacy 236-237: any resize handle sets .app.resizing (App.tsx renders the class) */
 /* Dragging writes the width every pointermove; animating it lags behind the cursor. */
 .app.resizing {
-	transition: none;
+  transition: none;
 }
 
 /* legacy 191-203: sidebar column (App.tsx renders aside.sidebar) */
 .sidebar {
-	position: relative;
-	grid-column: 1;
-	grid-row: 1;
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-	min-height: 0;
-	overflow: hidden;
-	border-right: 1px solid var(--line);
-	background: var(--sidebar);
+  position: relative;
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--sidebar);
 }
 .app.sidebar-hidden .sidebar {
-	border-right: 0;
+  border-right: 0;
 }
 
 /* legacy 248-257: brand mark, shared by the sidebar brand row and the logged-out overlay */
 .brand-mark {
-	display: grid;
-	place-items: center;
-	width: 30px;
-	height: var(--control-h-sm);
-	border-radius: var(--radius-row);
-	background: var(--ink);
-	color: var(--surface);
-	font: 700 14px / 1 var(--mono);
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: var(--control-h-sm);
+  border-radius: var(--radius-row);
+  background: var(--ink);
+  color: var(--surface);
+  font: 700 14px / 1 var(--mono);
 }
 
 /* legacy 675-684: main column (App.tsx renders main.main) */
 .main {
-	position: relative;
-	grid-column: 2;
-	grid-row: 1;
-	display: flex;
-	flex-direction: column;
-	min-width: 0;
-	min-height: 0;
-	background: var(--canvas);
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--canvas);
 }
 
 /* legacy 705, 708, 721-726: rendered Markdown, shared by messages and the file preview */
 .message-body {
-	position: relative;
-	max-width: min(100%, 70ch);
-	font-size: 15px;
-	line-height: 1.75;
-	overflow-wrap: anywhere;
+  position: relative;
+  max-width: min(100%, 70ch);
+  font-size: 15px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+/* lib/markdown: headings carry their own spacing; a blank line in the source is a short gap. */
+.message-body h2,
+.message-body h3,
+.message-body h4 {
+  margin: 14px 0 6px;
+  line-height: 1.45;
+}
+.message-body > h2:first-child,
+.message-body > h3:first-child,
+.message-body > h4:first-child {
+  margin-top: 0;
+}
+.message-body .md-li {
+  position: relative;
+  display: block;
+  padding-left: 1.1em;
+}
+.message-body .md-li::before {
+  position: absolute;
+  left: 0.25em;
+  content: "•";
+  color: var(--ink-3);
+}
+.message-body .md-gap {
+  display: block;
+  height: 10px;
 }
 .message-body code:not(.code-block code) {
-	padding: 2px 5px;
-	border-radius: var(--radius-inline-code);
-	background: var(--surface-soft);
-	font: 13px / 1.5 var(--mono);
+  padding: 2px 5px;
+  border-radius: var(--radius-inline-code);
+  background: var(--surface-soft);
+  font: 13px / 1.5 var(--mono);
 }
 .code-block {
-	overflow: hidden;
-	margin: 12px 0;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-surface);
-	background: var(--code-surface);
+  overflow: hidden;
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-surface);
+  background: var(--code-surface);
 }
 .code-block-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	height: var(--control-h-md);
-	padding: 0 10px;
-	border-bottom: 1px solid var(--line);
-	color: var(--ink-3);
-	font: 11px / 1 var(--mono);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--control-h-md);
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-3);
+  font: 11px / 1 var(--mono);
 }
 .copy-code {
-	padding: 4px 6px;
-	border-radius: var(--radius-tiny);
-	color: var(--ink-2);
-	font: 11px / 1 var(--sans);
+  padding: 4px 6px;
+  border-radius: var(--radius-tiny);
+  color: var(--ink-2);
+  font: 11px / 1 var(--sans);
 }
 .copy-code:hover {
-	background: var(--hover);
+  background: var(--hover);
 }
 .code-block pre {
-	max-height: 360px;
-	overflow: auto;
-	padding: 12px 14px;
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px 14px;
 }
 .code-block code {
-	font: 12px / 1.65 var(--mono);
-	white-space: pre;
+  tab-size: 4;
+  font: 12px / 1.65 var(--mono);
+  white-space: pre;
 }
 
 /* legacy 912: chevron in composer and workspace controls */
 .chevron {
-	flex: none;
-	color: var(--ink-3);
+  flex: none;
+  color: var(--ink-3);
 }
 
 /* legacy 1417-1419: narrow viewport tokens */
 @media (max-width: 760px) {
-	:root {
-		--sidebar-width: 222px;
-		--gutter: 18px;
-	}
+  :root {
+    --sidebar-width: 222px;
+    --gutter: 18px;
+  }
 }
 
 /* legacy 1426-1428 */
 @media (prefers-reduced-motion: reduce) {
-	*,
-	*::before,
-	*::after {
-		/* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component. */
-		animation: none !important;
-		/* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component. */
-		transition: none !important;
-	}
+  *,
+  *::before,
+  *::after {
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component. */
+    animation: none !important;
+    /* biome-ignore lint/complexity/noImportantStyles: reduced motion must override every component. */
+    transition: none !important;
+  }
 }
 
 /*
@@ -386,34 +414,36 @@ select {
  * inside a drag region must opt out or they stop receiving clicks.
  */
 :root {
-	--titlebar-inset: 0px;
+  --titlebar-inset: 0px;
 }
 [data-host="desktop"][data-platform="darwin"] {
-	--titlebar-inset: 28px;
+  --titlebar-inset: 28px;
 }
 [data-host="desktop"][data-platform="darwin"] .sidebar {
-	padding-top: var(--titlebar-inset);
+  padding-top: var(--titlebar-inset);
 }
 [data-host="desktop"][data-platform="darwin"] .sidebar::before {
-	content: "";
-	position: absolute;
-	top: 0;
-	right: 0;
-	left: 0;
-	height: var(--titlebar-inset);
-	-webkit-app-region: drag;
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--titlebar-inset);
+  -webkit-app-region: drag;
 }
 [data-host="desktop"] .brand-row {
-	-webkit-app-region: drag;
+  -webkit-app-region: drag;
 }
 [data-host="desktop"] .brand-row button,
 [data-host="desktop"] .brand-row a,
 [data-host="desktop"] .brand-row input {
-	-webkit-app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 [data-host="desktop"][data-platform="darwin"] .file-tree {
-	top: calc(var(--brand-row-h) + var(--titlebar-inset));
+  top: calc(var(--brand-row-h) + var(--titlebar-inset));
 }
-[data-host="desktop"][data-platform="darwin"] .app.sidebar-hidden .sidebar-show {
-	left: 84px;
+[data-host="desktop"][data-platform="darwin"]
+  .app.sidebar-hidden
+  .sidebar-show {
+  left: 84px;
 }

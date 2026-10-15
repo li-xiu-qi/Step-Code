@@ -1,9 +1,12 @@
-import { useLayoutEffect, useRef } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useLocale, useT } from "../../i18n";
+import { collectTurnChanges } from "../../lib/turn-changes";
 import { useAppStore } from "../../state/store";
 import type { TimelineItem } from "../../state/types";
 import { MessageItem } from "./MessageItem";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 import { ApprovalCard, ToolRow } from "./TimelineRows";
+import { TurnChangesCard } from "./TurnChangesCard";
 
 /** Shown while the timeline is empty (legacy index.html 835-842, `renderTimeline`). */
 function EmptyConversation() {
@@ -36,31 +39,109 @@ function itemKeys(items: readonly TimelineItem[]): string[] {
 }
 
 /**
+ * Whether a running turn is between visible steps: right after the prompt, or
+ * after a tool finished and before the model's next output. A streaming reply,
+ * a running tool or an approval card already shows what is going on.
+ */
+function awaitingOutput(items: readonly TimelineItem[]): boolean {
+	const last = items.at(-1);
+	if (!last) return true;
+	if (last.kind === "message") return last.role === "user";
+	if (last.kind === "tool") return last.state !== "pending";
+	return false;
+}
+
+function scrollToEnd(stream: HTMLElement | null): void {
+	if (stream) stream.scrollTop = stream.scrollHeight;
+}
+
+/** Within this many pixels of the end the stream counts as "at the bottom" and follows new output. */
+const STICK_THRESHOLD = 48;
+
+/**
  * `#stream > #streamInner`: the session timeline (legacy `renderTimeline`,
- * app.js 2246-2281). Like the legacy renderer it jumps to the bottom every time
- * the timeline (or the language) changes. The task banner and usage trigger the
- * legacy function refreshed afterwards derive from the store on their own.
+ * app.js 2246-2281). New output keeps the view pinned to the bottom only while
+ * the reader is there: scrolling up during a turn leaves the view alone.
+ * Opening a session or sending a message pins it again.
  */
 export function ConversationStream() {
 	const items = useAppStore((state) => state.timelineItems);
+	const pendingTurn = useAppStore((state) => state.pendingTurn);
+	const sessionId = useAppStore((state) => state.current?.id ?? "");
+	const cwd = useAppStore((state) => state.current?.cwd ?? "");
+	const status = useAppStore((state) => state.current?.status);
+	const revertedTurns = useAppStore((state) => state.current?.revertedTurns);
+	const running = status === "running";
+	const busy = running || status === "waiting";
 	const locale = useLocale();
 	const streamRef = useRef<HTMLDivElement>(null);
+	const innerRef = useRef<HTMLDivElement>(null);
+	const stick = useRef(true);
 	const keys = itemKeys(items);
-	// biome-ignore lint/correctness/useExhaustiveDependencies: legacy renderTimeline scrolled to the bottom on every redraw; items and locale are the redraw triggers.
+	const turns = useMemo(() => collectTurnChanges(items, cwd), [items, cwd]);
+
+	// A new session or a sent message: follow the bottom again.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: the session id and the pending message are the triggers.
 	useLayoutEffect(() => {
-		const stream = streamRef.current;
-		if (stream) stream.scrollTop = stream.scrollHeight;
+		stick.current = true;
+		scrollToEnd(streamRef.current);
+	}, [sessionId, pendingTurn]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: items and locale change the content height.
+	useLayoutEffect(() => {
+		if (stick.current) scrollToEnd(streamRef.current);
 	}, [items, locale]);
+	// The live reply grows between store updates (smooth reveal), so watch the size too.
+	useEffect(() => {
+		const inner = innerRef.current;
+		if (!inner) return;
+		const observer = new ResizeObserver(() => {
+			if (stick.current) scrollToEnd(streamRef.current);
+		});
+		observer.observe(inner);
+		return () => observer.disconnect();
+	}, []);
+	const onScroll = () => {
+		const stream = streamRef.current;
+		if (stream) stick.current = stream.scrollHeight - stream.scrollTop - stream.clientHeight < STICK_THRESHOLD;
+	};
+
+	// A pending message is drawn after the timeline, so the indicator follows it.
+	const thinking = pendingTurn !== null || (running && awaitingOutput(items));
+	const cardAfter = new Map(
+		turns
+			.filter((turn) => !turn.latest || pendingTurn !== null || !busy)
+			.map((turn) => [turn.lastIndex, turn] as const),
+	);
 	return (
-		<div className="stream" id="stream" ref={streamRef}>
-			<div className="stream-inner" id="streamInner">
-				{items.length ? (
-					items.map((item, index) => {
-						const key = keys[index];
-						if (item.kind === "message") return <MessageItem key={key} item={item} />;
-						if (item.kind === "tool") return <ToolRow key={key} item={item} />;
-						return <ApprovalCard key={key} approval={item.approval} />;
-					})
+		<div className="stream" id="stream" ref={streamRef} onScroll={onScroll}>
+			<div className="stream-inner" id="streamInner" ref={innerRef}>
+				{items.length || pendingTurn ? (
+					<>
+						{items.map((item, index) => {
+							const card = cardAfter.get(index);
+							// Always a fragment, so a card appearing under a row does not remount the row.
+							return (
+								<Fragment key={keys[index]}>
+									{item.kind === "message" ? (
+										<MessageItem item={item} />
+									) : item.kind === "tool" ? (
+										<ToolRow item={item} />
+									) : (
+										<ApprovalCard approval={item.approval} />
+									)}
+									{card ? (
+										<TurnChangesCard turn={card} reverted={Boolean(revertedTurns?.includes(card.turnId))} />
+									) : null}
+								</Fragment>
+							);
+						})}
+						{pendingTurn ? (
+							<MessageItem
+								item={{ itemId: "message-pending", kind: "message", role: "user", content: pendingTurn.text }}
+							/>
+						) : null}
+						{thinking ? <ThinkingIndicator /> : null}
+					</>
 				) : (
 					<EmptyConversation />
 				)}

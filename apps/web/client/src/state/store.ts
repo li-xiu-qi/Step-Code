@@ -90,7 +90,21 @@ export interface PreviewTab {
 	readonly rendered: boolean;
 }
 
+/** The preview panel's turn-changes view (features/files/ChangesView). */
+export interface ChangesViewState {
+	/** User entry id of the turn shown. */
+	readonly turnId: string;
+	/** Shown paths whose diff is unfolded. */
+	readonly expanded: ReadonlySet<string>;
+	/** Path to scroll into view, and a counter so asking twice scrolls twice. */
+	readonly focus: string | null;
+	readonly focusSeq: number;
+}
+
 export interface PreviewState {
+	/** `files` shows the tabs; `changes` the turn-changes view. */
+	readonly mode: "files" | "changes";
+	readonly changes: ChangesViewState | null;
 	readonly tabs: readonly PreviewTab[];
 	/** Index into `tabs`, -1 when there are none. */
 	readonly active: number;
@@ -120,6 +134,7 @@ export interface UiState {
 	readonly workspacePopoverOpen: boolean;
 	/** `#workspaceBrowserModal` visible */
 	readonly workspaceBrowserOpen: boolean;
+	readonly workspaceRemoval: { readonly path: string; readonly pending: boolean } | null;
 	/** `#userPopover` visible */
 	readonly userMenuOpen: boolean;
 	/** Which settings submenu is unfolded (`#themeSubmenu` / `#languageSubmenu`). */
@@ -143,6 +158,10 @@ export interface UiState {
 	readonly promptFocusRequest: number;
 	/** Mid-pane view covering the conversation: `#cronView` or `#marketView` (`.market-view.open`). */
 	readonly midView: "cron" | "market" | null;
+	/** Open menu of the changes view: `turn`, `more`, or `file:<shown path>`. */
+	readonly changesMenu: string | null;
+	/** The composer's slash menu: matching commands, or the MCP server list picked from it. */
+	readonly slashMenu: "commands" | "mcp" | null;
 }
 
 export interface ToastState {
@@ -152,10 +171,22 @@ export interface ToastState {
 	readonly seq: number;
 }
 
+export interface PendingTurn {
+	readonly text: string;
+	/** User messages in the timeline when it was sent; one more means the host has recorded it. */
+	readonly userCount: number;
+}
+
 export interface AppState {
 	readonly sessions: readonly SessionSummary[];
 	readonly current: SessionSnapshot | null;
 	readonly timelineItems: readonly TimelineItem[];
+	/**
+	 * A message sent but not yet in the session entries. The composer sets it on
+	 * Enter so the stream shows the message and a thinking indicator at once,
+	 * instead of after session creation, `agent_start` and the first token.
+	 */
+	readonly pendingTurn: PendingTurn | null;
 	readonly bootstrapCwd: string;
 	readonly draftCwd: string;
 	readonly draftPolicy: string;
@@ -218,6 +249,7 @@ export function createInitialState(): AppState {
 		sessions: [],
 		current: null,
 		timelineItems: [],
+		pendingTurn: null,
 		bootstrapCwd: "",
 		draftCwd: "",
 		draftPolicy: "ask",
@@ -237,6 +269,8 @@ export function createInitialState(): AppState {
 		treeExpandedByCwd: new Map(),
 		workspaces: [],
 		preview: {
+			mode: "files",
+			changes: null,
 			tabs: [],
 			active: -1,
 			open: false,
@@ -259,6 +293,7 @@ export function createInitialState(): AppState {
 			searchOpen: false,
 			workspacePopoverOpen: false,
 			workspaceBrowserOpen: false,
+			workspaceRemoval: null,
 			userMenuOpen: false,
 			preferenceSubmenu: null,
 			sessionMenu: null,
@@ -267,6 +302,8 @@ export function createInitialState(): AppState {
 			loggedOut: false,
 			promptFocusRequest: 0,
 			midView: null,
+			changesMenu: null,
+			slashMenu: null,
 		},
 		toast: null,
 	};

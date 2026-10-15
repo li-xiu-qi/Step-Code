@@ -443,8 +443,15 @@ export class ExtensionRunner {
 	}
 
 	private wrapUIPromptContext(ui: ExtensionUIContext): ExtensionUIContext {
+		const clarify = ui.clarify;
 		return {
 			...ui,
+			...(clarify
+				? {
+						clarify: (questions: Parameters<typeof clarify>[0], signal?: AbortSignal) =>
+							this.withUIPrompt("custom", undefined, () => clarify.call(ui, questions, signal)),
+					}
+				: {}),
 			select: (title, options, opts) => this.withUIPrompt("select", title, () => ui.select(title, options, opts)),
 			confirm: (title, message, opts) => this.withUIPrompt("confirm", title, () => ui.confirm(title, message, opts)),
 			input: (title, placeholder, opts) =>

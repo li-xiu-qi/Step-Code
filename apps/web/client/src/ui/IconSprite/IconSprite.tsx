@@ -61,6 +61,14 @@ export const ICON_NAMES = [
 	"tag",
 	"clock",
 	"puzzle",
+	"question",
+	"pencil",
+	"terminal",
+	"fileDiff",
+	"undo",
+	"openExternal",
+	"fileSearch",
+	"mcp",
 ] as const;
 
 export type IconName = (typeof ICON_NAMES)[number];
@@ -68,6 +76,44 @@ export type IconName = (typeof ICON_NAMES)[number];
 export function IconSprite() {
 	return (
 		<svg className={cx(styles.root, "icon-sprite")} aria-hidden="true" focusable="false">
+			{/* Lucide square-terminal, adapted to the shared sprite. */}
+			<symbol
+				id="i-terminal"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<rect x="3" y="3" width="18" height="18" rx="2" />
+				<path d="m7 9 3 3-3 3M13 15h4" />
+			</symbol>
+			{/* Lucide message-circle-question and Feather edit-2; see docs/THIRD_PARTY_PROVENANCE.md. */}
+			<symbol
+				id="i-question"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z" />
+				<path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+				<path d="M12 17h.01" />
+			</symbol>
+			<symbol
+				id="i-pencil"
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.8"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M17 3a2.828 2.828 0 0 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+			</symbol>
 			<symbol id="i-sidebar" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5">
 				<rect x="1.75" y="2.75" width="14.5" height="12.5" rx="2" />
 				<path d="M6.5 2.75v12.5" />
@@ -236,6 +282,61 @@ export function IconSprite() {
 				strokeLinecap="round"
 			>
 				<path d="M9 3.5v11M3.5 9h11" />
+			</symbol>
+			{/* Turn change card and the changes panel. */}
+			<symbol
+				id="i-fileDiff"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+			>
+				<rect x="3" y="2.75" width="12" height="12.5" rx="2.5" />
+				<path d="M9 5.5v4M7 7.5h4M7 12h4" />
+			</symbol>
+			<symbol
+				id="i-undo"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.5"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M6.5 3.75 3.75 6.5 6.5 9.25" />
+				<path d="M3.75 6.5h6.5a4 4 0 0 1 0 8H8" />
+			</symbol>
+			<symbol
+				id="i-openExternal"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M8 3.25H5A1.75 1.75 0 0 0 3.25 5v8A1.75 1.75 0 0 0 5 14.75h8A1.75 1.75 0 0 0 14.75 13v-3" />
+				<path d="M10.5 3.25h4.25V7.5M14.5 3.5 9 9" />
+			</symbol>
+			<symbol
+				id="i-fileSearch"
+				viewBox="0 0 18 18"
+				fill="none"
+				stroke="currentColor"
+				strokeWidth="1.4"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			>
+				<path d="M8 15.25H5A1.75 1.75 0 0 1 3.25 13.5v-9A1.75 1.75 0 0 1 5 2.75h4.5l4 4v1.5" />
+				<path d="M9.5 2.75v4h4" />
+				<circle cx="11.75" cy="12" r="2.25" />
+				<path d="m13.4 13.65 1.6 1.6" />
+			</symbol>
+			{/* Model Context Protocol mark (simple-icons, CC0). */}
+			<symbol id="i-mcp" viewBox="0 0 24 24" fill="currentColor">
+				<path d="M15.688 2.343a2.588 2.588 0 0 0-3.61 0l-9.626 9.44a.863.863 0 0 1-1.203 0 .823.823 0 0 1 0-1.18l9.626-9.44a4.313 4.313 0 0 1 6.016 0 4.116 4.116 0 0 1 1.204 3.54 4.3 4.3 0 0 1 3.609 1.18l.05.05a4.115 4.115 0 0 1 0 5.9l-8.706 8.537a.274.274 0 0 0 0 .393l1.788 1.754a.823.823 0 0 1 0 1.18.863.863 0 0 1-1.203 0l-1.788-1.753a1.92 1.92 0 0 1 0-2.754l8.706-8.538a2.47 2.47 0 0 0 0-3.54l-.05-.049a2.588 2.588 0 0 0-3.607-.003l-7.172 7.034-.002.002-.098.097a.863.863 0 0 1-1.204 0 .823.823 0 0 1 0-1.18l7.273-7.133a2.47 2.47 0 0 0-.003-3.537z" />
+				<path d="M14.485 4.703a.823.823 0 0 0 0-1.18.863.863 0 0 0-1.204 0l-7.119 6.982a4.115 4.115 0 0 0 0 5.9 4.314 4.314 0 0 0 6.016 0l7.12-6.982a.823.823 0 0 0 0-1.18.863.863 0 0 0-1.204 0l-7.119 6.982a2.588 2.588 0 0 1-3.61 0 2.47 2.47 0 0 1 0-3.54l7.12-6.982z" />
 			</symbol>
 			<symbol id="i-more" viewBox="0 0 18 18" fill="currentColor">
 				<circle cx="4" cy="9" r="1.2" />

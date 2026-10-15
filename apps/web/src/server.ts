@@ -28,9 +28,11 @@ import {
 	classifyAttachment,
 	defaultWorkspace,
 	MAX_ATTACHMENT_BYTES,
+	mcpStatuses,
 	type WebAttachment,
 	WebSessionStore,
 } from "./runtime.ts";
+import { TurnRevertError } from "./turn-changes.ts";
 import { WORKSPACES_FILE, WorkspaceRegistry } from "./workspaces.ts";
 
 const moduleRoot = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -324,6 +326,7 @@ const server = createServer(async (request, response) => {
 				if (parts[3] === "files") return json(response, 200, await listDirectory(cwd, path));
 				if (parts[3] === "file") return json(response, 200, await readWorkspaceFile(cwd, path));
 				if (parts[3] === "raw") return await serveWorkspaceImage(response, cwd, path);
+				if (parts[3] === "skills") return json(response, 200, { skills: await store.skillsFor(cwd) });
 				if (parts[3] === "search") {
 					return json(response, 200, await searchWorkspaceFiles(cwd, url.searchParams.get("q") ?? ""));
 				}
@@ -331,6 +334,9 @@ const server = createServer(async (request, response) => {
 				// A bad path inside a valid workspace is the caller's mistake.
 				return error(response, 400, caught instanceof Error ? caught.message : String(caught));
 			}
+		}
+		if (parts[2] === "mcp" && parts.length === 3 && method === "GET") {
+			return json(response, 200, { servers: mcpStatuses() });
 		}
 		if (parts[2] === "sessions" && parts.length === 3 && method === "GET") {
 			const sessions = await store.list();
@@ -367,6 +373,7 @@ const server = createServer(async (request, response) => {
 				if (typeof input.text !== "string" || !input.text.trim()) return error(response, 400, "text is required");
 				const attachments = readAttachments(input.attachments);
 				if (attachments instanceof Error) return error(response, 400, attachments.message);
+				if (session.isReverting()) return error(response, 409, "Wait for the revert to finish");
 				void session.send(input.text, attachments ?? []).catch((caught) => {
 					session.publishError(caught instanceof Error ? caught.message : String(caught));
 				});
@@ -384,6 +391,17 @@ const server = createServer(async (request, response) => {
 				await session.interrupt();
 				return json(response, 200, { ok: true });
 			}
+			if (parts[4] === "clarifications" && parts[5] === "response" && parts.length === 6 && method === "POST") {
+				const input = await body(request);
+				if (typeof input.id !== "string") return error(response, 400, "Clarification id is required");
+				try {
+					if (!session.clarifications.respond(input.id, input))
+						return error(response, 404, "Clarification not found");
+				} catch (caught) {
+					return error(response, 400, caught instanceof Error ? caught.message : String(caught));
+				}
+				return json(response, 200, { ok: true });
+			}
 			if (parts[4] === "approvals" && parts[5] === "decision" && method === "POST") {
 				const input = await body(request);
 				const verdict = input.verdict;
@@ -392,6 +410,20 @@ const server = createServer(async (request, response) => {
 				if (typeof input.id !== "string" || !(await session.decideApproval(input.id, verdict)))
 					return error(response, 404, "Approval not found");
 				return json(response, 200, { ok: true });
+			}
+			if (parts[4] === "skills" && parts.length === 5 && method === "GET") {
+				return json(response, 200, { skills: session.skills() });
+			}
+			if (parts[4] === "turns" && parts[5] && parts[6] === "revert" && parts.length === 7 && method === "POST") {
+				try {
+					const { paths, skipped } = await session.revertTurn(decodeURIComponent(parts[5]));
+					return json(response, 200, { snapshot: session.snapshot(), paths, skipped });
+				} catch (caught) {
+					// A file changed since the turn, or the turn is running: the caller's state, not a server fault.
+					if (caught instanceof TurnRevertError)
+						return json(response, 409, { error: caught.message, code: caught.code, path: caught.path });
+					throw caught;
+				}
 			}
 			if (parts[4] === "name" && method === "PATCH") {
 				const input = await body(request);

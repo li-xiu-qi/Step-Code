@@ -56,6 +56,42 @@ The approval path is an adapter: Step extensions call
 request, and the browser returns `approve`, `approve_for_session`, or `deny`.
 Missing or cancelled approvals fail closed.
 
+Approval snapshots and SSE requests include the full captured tool `input` and
+the specific policy `reason`. The browser renders a neutral card with a localized
+approval title and the complete command or file-change preview, instead of the
+clipped Call/batch diagnostic message. Content initially shows three lines and
+can expand; the full arguments remain available before a verdict. The card offers
+only Deny and Allow for Session. Allow for Session is keyed by the canonical tool
+name, so later calls with different call IDs reuse the grant; other tools still
+ask. Specific danger or incomplete-analysis prompts still require a verdict per
+call, even with a session grant. These presentation changes do not alter the permission policy or the
+existing verdict endpoint.
+
+Clarification uses the existing `clarify_user` tool and the optional structured
+`ExtensionUIContext.clarify(questions, signal)` capability. The coding tool owns
+normalization and tool-result text; the Web Host transports the complete question
+set through `clarification_required` SSE and `pendingClarifications` in snapshots.
+The extension runner brackets this capability with the existing `custom`
+`ui_prompt_start` / `ui_prompt_end` lifecycle, so runtime consumers see the same
+user-wait interval as a terminal dialog.
+`POST /api/v1/sessions/{id}/clarifications/response` validates question order and
+option indexes, derives canonical option values, and resumes the pending tool
+call. It never sends the answer as a new user prompt. `clarification_resolved`
+removes the card on every connected page. Abort, session replacement and shutdown
+cancel pending calls. Browser reload restores pending questions while the Host is
+alive; restarting the Host does not replay interrupted tools.
+
+The composer shows a paginated question card above its input. Clicking a choice
+or skipping saves that answer and advances. The last outstanding answer submits
+the complete set automatically. Custom replies use Enter (Shift+Enter inserts a
+newline; IME confirmation does not submit). Paging preserves selections and text
+drafts. Navigating ahead never implicitly answers an earlier question. The close
+button cancels the set; failed sends retain answers for retry. Voice input is not
+part of this flow. The shared React client renders the same card in desktop hosts.
+`clarify_user` is classified as a non-mutating tool, so Ask opens the questions
+directly; explicit per-tool confirm/deny overrides still apply. Escape cancels
+the waiting turn through the existing interrupt action.
+
 Within one Web Host process, an in-memory per-session writer lease prevents two
 Web session objects from appending to the same JSONL file. This is not a
 cross-process lock. An older CLI that does not participate in a lease protocol
@@ -76,11 +112,22 @@ kdialog fallback on Linux. One dialog at a time; a second request is refused
 with 409. When the mode is `browse`, or when the helper fails, the page falls
 back to the in-folder browser, so the button is never dead.
 `STEPCODE_WEB_DIRECTORY_PICKER=native|browse` overrides the detection. The registry is Web Host metadata in
-`web-workspaces.json` beside the session metadata: it only decides which
-folders the sidebar lists before they hold a conversation. Removing a workspace
-unregisters it and never touches files or sessions; the control is offered only
-while the workspace has no conversations, because a workspace with sessions is
-listed through them regardless.
+`web-workspaces.json` beside the session metadata. Its `workspaces` array lists
+registered folders; `removedWorkspaces` records explicitly removed folders,
+including folders inferred from existing sessions. `GET /api/v1/workspaces`
+returns removed folders with `hidden: true` so session refreshes and page reloads
+cannot recreate their project group. Hidden folders are excluded from recent
+folder choices; their conversations remain readable under Recent and searchable.
+Adding the folder again clears its removal marker and restores its project group.
+
+Every project header offers removal, with or without conversations. An in-app
+dialog names the project and explains that files and existing chats are retained.
+Cancel has initial focus; Cancel, close, backdrop and Escape dismiss without a
+request. Confirmation disables the controls while deletion of the navigation
+entry is pending. Failures leave the dialog available for retry; the endpoint is
+idempotent so a failed refresh after a successful removal can be retried. Removal
+does not close or interrupt the active conversation, modify its history, or
+change access to the cwd of an existing session.
 
 File browsing is keyed by folder, not by session, so an empty workspace can be
 browsed. `GET /api/v1/workspace/{files,file,raw,search}` take a `cwd` and answer
@@ -115,6 +162,52 @@ picker (input/output totals, summed from the usage each assistant turn reports).
 Both stay out of the way when there is nothing to report — the banner hides until
 the session has run a task or a subagent, and the token control hides until a
 turn reports usage — so neither shows a placeholder figure.
+
+Each finished turn (one user message up to the next, including a message with
+images only) that changed files gets a card under its last row: "Edited N
+files", the summed `+added -removed` lines, and the files (three, then "show N
+more"). The data is the unified patch in the tool result `details.patch`, which
+both `edit` and `write` record themselves inside the file mutation queue, so it
+is persisted with the session entry and survives a reload. A `write` patch is
+taken after approval and after earlier calls of the same batch, and the result
+also records `created` and the overwritten file's line ending and BOM
+(`previous`). A write over 1 MB or of a binary file gets no patch
+(`details.untracked` says why); the card marks such files as not revertable,
+and a turn that ran `bash` says that what those commands changed is neither
+listed nor reverted. Clicking a file opens the preview panel in its changes view
+(turn picker, one row per file, inline diff with line numbers).
+"Undo" calls `POST /api/v1/sessions/{id}/turns/{turnId}/revert`. Each card undoes
+only its own turn: the turn's patches are reverse-applied newest first, and
+nothing is written unless all of them apply. Like `patch -R`, a hunk may have
+moved (later turns added lines elsewhere in the file) and its unchanged context
+lines may have been edited since; only the lines the turn itself changed must be
+intact. Otherwise the request is refused with 409 and a `code` (`conflict` with
+the file's path, `missing`, `busy` while a turn runs or another revert of the
+session is in progress, `reverted`), and the card tells the user to undo the
+later turns that touched the file first; a prompt sent during a revert also gets
+409. Undoing turns newest-first therefore always works. Files the turn created
+are deleted, and an overwritten file gets its previous line ending and BOM back.
+Files without a patch are left alone and listed in the response's `skipped`,
+which the toast names.
+A successful undo appends a `stepcode-web.turn-revert` custom message (in the
+model's context, not a new turn) naming the request and the restored files, so
+the model does not assume its edits are still on disk; the snapshot's
+`revertedTurns` is derived from these entries, so the state follows the branch
+and survives a host restart.
+
+The composer's slash menu opens when the whole prompt is a single `/word`. It
+lists `MCP` and the session's skills, fuzzy-matched with the CLI's scoring (a
+client copy of `packages/tui/src/fuzzy.ts`); arrow keys move, Enter or Tab
+picks, Escape closes. Skills come from `GET /api/v1/sessions/{id}/skills`
+(the session's resource loader, so plugin skills are included); a draft uses
+`GET /api/v1/workspace/skills`, which resolves the folder's skill resources
+without extensions. Picking a skill inserts `/skill:<name> `; the kernel
+expands it into the skill's instructions when the prompt is sent, and the
+conversation shows the skill as a chip above the request. Picking `MCP` shows
+`GET /api/v1/mcp` in place: every server with its state, tool count and start
+error, including servers disabled in `config.toml`. The kernel's own `/mcp`
+command only prints through `notify`, which the Web host does not render. The
+MCP status list is process-wide (written by the session that started last).
 
 Session archive flags are Web Host metadata in `web-sessions.json`; canonical
 conversation history remains the StepCode v3 JSONL file. Deleting a session

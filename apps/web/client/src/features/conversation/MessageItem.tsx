@@ -1,12 +1,14 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { formatRelativeTime, useT } from "../../i18n";
 import { formatTokens } from "../../lib/format";
-import { renderMarkdown } from "../../lib/markdown";
+import { renderMarkdown, skillInvocation } from "../../lib/markdown";
 import { copyText } from "../../state/session";
 import type { MessageTimelineItem } from "../../state/types";
 import { Icon, LEGACY_ICONS, MarkdownView } from "../../ui";
 import { forkAtEntry } from "./actions";
 import { openFeedback, type Sentiment } from "./feedback";
+import { useFadeIn, useSmoothText } from "./streaming";
+import { ThinkingIndicator } from "./ThinkingIndicator";
 
 /**
  * One chat message (legacy `renderTimeline` message branch, app.js 2253-2261).
@@ -15,21 +17,83 @@ import { openFeedback, type Sentiment } from "./feedback";
 export const MessageItem = memo(function MessageItem({ item }: { readonly item: MessageTimelineItem }) {
 	const t = useT();
 	const role = item.role === "user" ? "user" : "assistant";
-	const placeholder = item.thinking ? t("thinkingLive") : t("generating");
+	const live = item.itemId === "message-live";
 	const codeLabel = t("code");
 	const copyLabel = t("copy");
+	const bodyRef = useRef<HTMLDivElement>(null);
+	const skill = role === "user" ? skillInvocation(item.content) : null;
+	const text = useSmoothText(skill ? skill.request : item.content, live);
+	// A user message can be images only; it still opens a turn, so it gets a row.
+	const content = text || (role === "user" && item.images ? t("imageMessage", { count: item.images }) : text);
 	// Memoised: a streaming turn re-renders the timeline per frame, and parsing every earlier message each time made long sessions crawl.
 	const html = useMemo(
-		() => renderMarkdown(item.content || placeholder, { code: codeLabel, copy: copyLabel }),
-		[item.content, placeholder, codeLabel, copyLabel],
+		() => renderMarkdown(content, { code: codeLabel, copy: copyLabel }),
+		[content, codeLabel, copyLabel],
 	);
+	useFadeIn(bodyRef, html, live);
+	if (item.error) return <MessageError entryId={item.entryId} error={item.error} />;
+	// The live turn before its first text (reasoning, or waiting on the first token).
+	if (role === "assistant" && !content) return <ThinkingIndicator />;
 	return (
 		<article className={`message ${role}`} data-content={item.content || ""} data-entry-id={item.entryId}>
-			<MarkdownView className="message-body" html={html} onCopyCode={(code) => void copyText(code)} />
+			{skill ? (
+				<span className="message-skill" title={skill.name}>
+					<Icon name="cube" size="xs" />
+					{skill.name}
+				</span>
+			) : null}
+			{content ? (
+				<MarkdownView
+					ref={bodyRef}
+					className="message-body"
+					html={html}
+					onCopyCode={(code) => void copyText(code)}
+				/>
+			) : null}
 			{item.role === "assistant" ? <MessageActions item={item} /> : null}
 		</article>
 	);
 });
+
+/** `403: {"message": "..."}` -> the status and the provider's message; anything else unchanged. */
+function errorDetail(error: string): { readonly status: string; readonly message: string } {
+	const match = /^(\d{3}):\s*(\{[\s\S]*\})\s*$/.exec(error);
+	if (!match) return { status: "", message: error };
+	try {
+		const body = JSON.parse(match[2]) as { message?: unknown; error?: { message?: unknown } };
+		const message = body.message ?? body.error?.message;
+		return { status: match[1], message: typeof message === "string" ? message : error };
+	} catch {
+		return { status: "", message: error };
+	}
+}
+
+/** A failed model request: the provider's message, with any URL in it as a link (e.g. account verification). */
+function MessageError({ entryId, error }: { readonly entryId?: string; readonly error: string }) {
+	const t = useT();
+	const detail = errorDetail(error);
+	const parts = detail.message.split(/(https?:\/\/[^\s"'<>)]*[^\s"'<>),.;:!?])/g);
+	return (
+		<article className="message assistant message-error" role="alert" data-entry-id={entryId}>
+			<div className="message-error-title">
+				{t("modelRequestFailed")}
+				{detail.status ? <span className="message-error-status">{detail.status}</span> : null}
+			</div>
+			<p className="message-error-text">
+				{parts.map((part, index) =>
+					index % 2 ? (
+						// biome-ignore lint/suspicious/noArrayIndexKey: the parts of one fixed string.
+						<a key={index} href={part} target="_blank" rel="noreferrer">
+							{part}
+						</a>
+					) : (
+						part
+					),
+				)}
+			</p>
+		</article>
+	);
+}
 
 /**
  * The row under an assistant turn: copy, vote, fork, then what the turn cost and

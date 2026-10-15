@@ -12,12 +12,15 @@ import { t } from "../i18n";
 import { api, apiSend, errorMessage, setUnauthorizedHandler } from "../lib/api";
 import { writeClipboard } from "../lib/clipboard";
 import { basename, clipDetail, compact, toolInputDetail, toolInputSummary } from "../lib/format";
-import { contentText } from "../lib/markdown";
+import { contentText, skillInvocation } from "../lib/markdown";
 import { type AppState, getState, mapWith, setState, setUi } from "./store";
 import type {
+	AgentMessage,
 	ApprovalRequest,
 	BootstrapPayload,
+	ClarificationRequest,
 	ContentPart,
+	FileChange,
 	SessionEntry,
 	SessionSnapshot,
 	SessionStatus,
@@ -68,9 +71,11 @@ export async function copyText(value: string, successText: string = t("copied"))
 
 /** Display title of a session (legacy `sessionTitle`, 719-725). */
 export function sessionTitle(session: Partial<SessionSummary> | null | undefined): string {
+	// A conversation opened with a skill starts with (and is auto-named after) the skill's whole instructions.
+	const text = session?.name || session?.firstMessage;
+	const skill = text ? skillInvocation(text) : null;
 	return (
-		session?.name ||
-		session?.firstMessage ||
+		(skill ? skill.request || skill.name : text) ||
 		(session?.id ? `Session ${session.id.slice(0, 8)}` : t("newConversation"))
 	);
 }
@@ -91,7 +96,10 @@ export function knownWorkspaces(state: AppState): string[] {
 	for (const session of state.sessions) {
 		if (session.cwd && session.cwdAvailable !== false) values.add(session.cwd);
 	}
-	return [...values].sort((left, right) => basename(left).localeCompare(basename(right), "zh-CN"));
+	const hidden = new Set(state.workspaces.filter((workspace) => workspace.hidden).map((workspace) => workspace.path));
+	return [...values]
+		.filter((path) => !hidden.has(path))
+		.sort((left, right) => basename(left).localeCompare(basename(right), "zh-CN"));
 }
 
 /** The cwd new work should target: current session, else draft, else launch folder. */
@@ -118,6 +126,31 @@ export function mergeSessionSummary(
 	return next;
 }
 
+/**
+ * The file change of a finished edit/write call: both tools record a unified
+ * patch in their result details; `write` says why when it recorded none.
+ */
+function fileChange(name: string, args: unknown, result: AgentMessage | undefined): FileChange | undefined {
+	if ((name !== "edit" && name !== "write") || !result || result.isError) return undefined;
+	const details = (result.details ?? {}) as { patch?: unknown; untracked?: unknown };
+	const input = (args ?? {}) as { path?: unknown; file_path?: unknown };
+	const path = typeof input.path === "string" ? input.path : input.file_path;
+	if (typeof path !== "string" || !path.trim()) return undefined;
+	if (typeof details.patch === "string") return { path, patch: details.patch };
+	const reason = details.untracked;
+	return {
+		path,
+		untracked: reason === "too_large" || reason === "binary" || reason === "unreadable" ? reason : "unknown",
+	};
+}
+
+/** Image parts of a message's content. */
+function imageCount(content: unknown): number {
+	return Array.isArray(content)
+		? (content as readonly ContentPart[]).filter((part) => part?.type === "image").length
+		: 0;
+}
+
 /** Project session entries into timeline rows (legacy `timelineFromEntries`, 2055-2096). */
 export function timelineFromEntries(entries: readonly SessionEntry[] = []): TimelineItem[] {
 	const items: TimelineItem[] = [];
@@ -132,13 +165,22 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		const message = entry.message;
 		if (message.role === "toolResult") continue;
 		const text = contentText(message.content);
-		if (text) {
+		const images = message.role === "user" ? imageCount(message.content) : 0;
+		// A failed request leaves an assistant message with no content; without a row the error was invisible.
+		const error =
+			message.role === "assistant" && message.stopReason === "error"
+				? String(message.errorMessage || t("modelRequestFailed"))
+				: "";
+		// Every user message opens a turn (the host's turn boundary), even one without text.
+		if (text || error || message.role === "user") {
 			items.push({
 				itemId: `message-${entry.id}`,
 				entryId: entry.id,
 				kind: "message",
 				role: message.role,
 				content: text,
+				...(images ? { images } : {}),
+				...(error ? { error } : {}),
 				usage: entry.usage,
 				timestamp: entry.timestamp,
 			});
@@ -146,6 +188,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 		if (message.role === "assistant" && Array.isArray(message.content)) {
 			for (const block of (message.content as readonly ContentPart[]).filter((part) => part?.type === "toolCall")) {
 				const result = toolResults.get(String(block.id));
+				const change = fileChange(String(block.name ?? ""), block.arguments, result);
 				items.push({
 					itemId: `tool-${block.id}`,
 					kind: "tool",
@@ -155,6 +198,7 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
 					outputSummary: result ? compact(contentText(result.content)) : "",
 					inputDetail: toolInputDetail(block.arguments),
 					outputDetail: result ? clipDetail(contentText(result.content)) : "",
+					...(change ? { change } : {}),
 				});
 			}
 		}
@@ -169,6 +213,8 @@ export function timelineFromEntries(entries: readonly SessionEntry[] = []): Time
  * "waiting" with nothing to answer.
  */
 const liveApprovals = new Map<string, ApprovalRequest>();
+const liveClarifications = new Map<string, ClarificationRequest>();
+const resolvedClarifications = new Set<string>();
 
 /** Drop an approval once it is decided or its session is no longer waiting. */
 export function forgetApproval(id: string): void {
@@ -190,17 +236,34 @@ function approvalItems(snapshot: SessionSnapshot): TimelineItem[] {
  * Everything the legacy function painted is derived from these fields.
  */
 export function renderSnapshot(snapshot: SessionSnapshot): void {
-	setState((state) => ({
-		current: snapshot,
-		policiesCache: snapshot.policies ?? state.policiesCache,
-		draftCwd: snapshot.cwd,
-		draftPolicy: snapshot.permissionPreset || "ask",
-		draftModel: snapshot.model ? modelKey(snapshot.model) : "",
-		statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
-		unreadById: mapWith(state.unreadById, snapshot.id, false),
-		sessions: mergeSessionSummary(state.sessions, snapshot),
-		timelineItems: [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)],
-	}));
+	const pending = new Map((snapshot.pendingClarifications ?? []).map((request) => [request.id, request]));
+	for (const request of liveClarifications.values()) {
+		if (request.sessionId === snapshot.id) pending.set(request.id, request);
+	}
+	for (const id of resolvedClarifications) pending.delete(id);
+	snapshot = { ...snapshot, pendingClarifications: [...pending.values()] };
+	setState((state) => {
+		const timelineItems = [...timelineFromEntries(snapshot.entries), ...approvalItems(snapshot)];
+		const pendingTurn =
+			state.pendingTurn && countUserMessages(timelineItems) > state.pendingTurn.userCount ? null : state.pendingTurn;
+		return {
+			current: snapshot,
+			policiesCache: snapshot.policies ?? state.policiesCache,
+			draftCwd: snapshot.cwd,
+			draftPolicy: snapshot.permissionPreset || "ask",
+			draftModel: snapshot.model ? modelKey(snapshot.model) : "",
+			statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
+			unreadById: mapWith(state.unreadById, snapshot.id, false),
+			sessions: mergeSessionSummary(state.sessions, snapshot),
+			timelineItems,
+			pendingTurn,
+		};
+	});
+}
+
+/** User messages in a timeline; `pendingTurn` compares this before and after a send. */
+export function countUserMessages(items: readonly TimelineItem[]): number {
+	return items.filter((item) => item.kind === "message" && item.role === "user").length;
 }
 
 /* ── Live stream ─────────────────────────────────────────────────────────── */
@@ -212,11 +275,13 @@ export function closeStream(): void {
 	stream?.close();
 	stream = null;
 	liveApprovals.clear();
+	liveClarifications.clear();
+	resolvedClarifications.clear();
 }
 
 interface AgentStreamEvent {
 	readonly type: string;
-	readonly message?: { readonly content?: unknown };
+	readonly message?: { readonly role?: string; readonly content?: unknown };
 	readonly toolCallId?: string;
 	readonly toolName?: string;
 	readonly args?: unknown;
@@ -257,7 +322,6 @@ function applyLiveMessage(content: unknown): void {
 	const text = contentText(content);
 	const parts = Array.isArray(content) ? (content as readonly ContentPart[]) : [];
 	const calls = parts.filter((part) => part?.type === "toolCall");
-	const thinking = !text && parts.some((part) => part?.type === "thinking");
 	updateTimeline((items) => {
 		let next = items;
 		if (text || calls.length === 0) {
@@ -266,7 +330,6 @@ function applyLiveMessage(content: unknown): void {
 				kind: "message",
 				role: "assistant",
 				content: text,
-				thinking,
 			});
 		} else {
 			next = next.filter((item) => item.itemId !== "message-live");
@@ -321,6 +384,22 @@ function handleAgentEvent(agentEvent: AgentStreamEvent): void {
 		return;
 	}
 	flushLiveMessage();
+	if (agentEvent.type === "message_start" && agentEvent.message?.role === "user") {
+		// The prompt entered the loop: show it in place now; the refresh after
+		// its message_end replaces this row with the recorded entry.
+		const content = contentText(agentEvent.message.content);
+		const images = imageCount(agentEvent.message.content);
+		setState((state) => ({
+			pendingTurn: null,
+			timelineItems: upsertItem(state.timelineItems, {
+				itemId: "message-user-live",
+				kind: "message",
+				role: "user",
+				content,
+				...(images ? { images } : {}),
+			}),
+		}));
+	}
 	if (agentEvent.type === "tool_execution_start") {
 		updateTimeline((items) =>
 			upsertItem(items, {
@@ -368,7 +447,9 @@ export function connectStream(id: string): void {
 	stream?.close();
 	const source = new EventSource(`/api/v1/sessions/${id}/events`);
 	stream = source;
-	source.addEventListener("snapshot", (event) => renderSnapshot(JSON.parse((event as MessageEvent).data)));
+	source.addEventListener("snapshot", (event) => {
+		if (stream === source) renderSnapshot(JSON.parse((event as MessageEvent).data));
+	});
 	source.addEventListener("agent", (event) => {
 		handleAgentEvent(JSON.parse((event as MessageEvent).data).event as AgentStreamEvent);
 	});
@@ -376,6 +457,8 @@ export function connectStream(id: string): void {
 		const payload = JSON.parse((event as MessageEvent).data) as { status: SessionStatus; unread: boolean };
 		if (payload.status !== "waiting") liveApprovals.clear();
 		setState((state) => ({
+			// Only a running turn can still record the pending message.
+			pendingTurn: state.current?.id === id && payload.status !== "running" ? null : state.pendingTurn,
 			statusById: mapWith(state.statusById, id, payload.status),
 			unreadById: mapWith(state.unreadById, id, payload.unread),
 			current:
@@ -393,9 +476,44 @@ export function connectStream(id: string): void {
 				: [...items, { itemId: `approval-${approval.id}`, kind: "approval", approval }],
 		);
 	});
-	source.addEventListener("web_error", (event) =>
-		showError(JSON.parse((event as MessageEvent).data).message || "运行错误"),
-	);
+	source.addEventListener("clarification_required", (event) => {
+		const request = JSON.parse((event as MessageEvent).data).clarification as ClarificationRequest;
+		if (stream !== source || request.sessionId !== id) return;
+		liveClarifications.set(request.id, request);
+		setState((state) => ({
+			current:
+				state.current?.id === id
+					? {
+							...state.current,
+							pendingClarifications: [
+								...(state.current.pendingClarifications ?? []).filter((item) => item.id !== request.id),
+								request,
+							],
+						}
+					: state.current,
+		}));
+	});
+	source.addEventListener("clarification_resolved", (event) => {
+		if (stream !== source) return;
+		const requestId = JSON.parse((event as MessageEvent).data).id as string;
+		liveClarifications.delete(requestId);
+		resolvedClarifications.add(requestId);
+		setState((state) => ({
+			current:
+				state.current?.id === id
+					? {
+							...state.current,
+							pendingClarifications: (state.current.pendingClarifications ?? []).filter(
+								(item) => item.id !== requestId,
+							),
+						}
+					: state.current,
+		}));
+	});
+	source.addEventListener("web_error", (event) => {
+		setState({ pendingTurn: null });
+		showError(JSON.parse((event as MessageEvent).data).message || "运行错误");
+	});
 	source.onerror = () => {
 		setTimeout(() => void refreshCurrent().catch(() => {}), 600);
 	};
@@ -413,7 +531,8 @@ export async function refreshSessions(): Promise<void> {
 export async function refreshCurrent(): Promise<void> {
 	const current = getState().current;
 	if (!current) return;
-	renderSnapshot(await api<SessionSnapshot>(`/api/v1/sessions/${current.id}`));
+	const snapshot = await api<SessionSnapshot>(`/api/v1/sessions/${current.id}`);
+	if (getState().current?.id === current.id) renderSnapshot(snapshot);
 }
 
 /** Reload the registered workspaces (legacy `refreshWorkspaces`, 1984-1987). */
@@ -425,6 +544,7 @@ export async function refreshWorkspaces(): Promise<void> {
 /** Open a session and follow its stream (legacy `openSession`, 3122-3130). */
 export async function openSession(id: string): Promise<void> {
 	setUi({ midView: null });
+	setState({ pendingTurn: null });
 	try {
 		const snapshot = await api<SessionSnapshot>(`/api/v1/sessions/${id}`);
 		renderSnapshot(snapshot);
@@ -452,6 +572,7 @@ export function startDraft(cwd: string = getState().bootstrapCwd): void {
 			draftModel: current ? (current.model ? modelKey(current.model) : state.draftModel) : state.draftModel,
 			current: null,
 			timelineItems: [],
+			pendingTurn: null,
 			draftCwd: cwd || state.bootstrapCwd,
 		};
 	});
@@ -493,7 +614,7 @@ export async function createSessionIfNeeded(): Promise<SessionSnapshot> {
 /** Stop the running turn of the current session (legacy `interruptCurrent`, 3245-3254). */
 export async function interruptCurrent(): Promise<void> {
 	const current = getState().current;
-	if (!current || current.status !== "running") return;
+	if (!current || (current.status !== "running" && current.status !== "waiting")) return;
 	try {
 		await apiSend(`/api/v1/sessions/${current.id}/interrupt`, "POST");
 	} catch (error) {

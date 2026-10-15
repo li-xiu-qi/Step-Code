@@ -5,9 +5,27 @@
 
 import { t } from "../../i18n";
 import { api, apiSend, errorMessage } from "../../lib/api";
-import { createSessionIfNeeded, renderSnapshot, showError } from "../../state/session";
+import { countUserMessages, createSessionIfNeeded, renderSnapshot, showError } from "../../state/session";
 import { getState, type ModeId, setState } from "../../state/store";
-import type { Attachment, SessionSnapshot } from "../../state/types";
+import type { Attachment, ClarificationReply, ClarificationRequest, SessionSnapshot } from "../../state/types";
+
+export async function replyToClarification(
+	request: ClarificationRequest,
+	answers: readonly ClarificationReply[],
+	cancelled = false,
+): Promise<boolean> {
+	try {
+		await apiSend(`/api/v1/sessions/${request.sessionId}/clarifications/response`, "POST", {
+			id: request.id,
+			answers,
+			cancelled,
+		});
+		return true;
+	} catch (error) {
+		showError(errorMessage(error));
+		return false;
+	}
+}
 
 /* ── Permission policy (legacy renderPolicies onSelect 2534-2541, `policychange` 3509-3522) ── */
 
@@ -147,8 +165,11 @@ export function removeAttachment(index: number): void {
 export async function sendMessage(text: string): Promise<boolean> {
 	// Attachments are sent with the message and dropped afterwards, so a failed
 	// send has to put both back.
-	const attachments = getState().attachments;
-	setState({ attachments: [] });
+	const { attachments, current, timelineItems } = getState();
+	// A message steered into a running turn waits for the current step, so only
+	// a new turn gets the immediate message and thinking indicator.
+	const pendingTurn = current?.status === "running" ? null : { text, userCount: countUserMessages(timelineItems) };
+	setState({ attachments: [], pendingTurn });
 	try {
 		const session = await createSessionIfNeeded();
 		const endpoint = session.status === "running" ? "steer" : "messages";
@@ -158,7 +179,7 @@ export async function sendMessage(text: string): Promise<boolean> {
 		});
 		return true;
 	} catch (error) {
-		setState({ attachments });
+		setState({ attachments, pendingTurn: null });
 		showError(errorMessage(error));
 		return false;
 	}

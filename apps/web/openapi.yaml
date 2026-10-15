@@ -62,7 +62,7 @@ paths:
   /api/v1/workspaces:
     get:
       responses:
-        "200": { description: "Registered workspaces: path, name, available" }
+        "200": { description: "Workspace navigation entries: path, name, available, optional hidden=true for explicitly removed folders. Hidden entries persist across reload; chats remain searchable and appear under Recent. Adding the folder clears hidden." }
     post:
       requestBody:
         required: true
@@ -80,8 +80,8 @@ paths:
       parameters:
         - { name: path, in: query, required: true, schema: { type: string } }
       responses:
-        "200": { description: Workspace unregistered; files and sessions untouched }
-        "404": { description: Workspace is not registered }
+        "200": { description: Workspace hidden persistently, including session-derived folders; idempotent for retries. Files and sessions untouched. }
+        "404": { description: Path is missing or not absolute }
   /api/v1/workspaces/pick:
     post:
       description: |
@@ -157,7 +157,19 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
-        "200": { description: Session snapshot }
+        "200":
+          description: Session snapshot including pendingClarifications (in-memory requests restored after page reload)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pendingClarifications:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClarificationRequest" }
+                  pendingApprovals:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApprovalRequest" }
     delete:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
@@ -168,13 +180,14 @@ paths:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
-        "200": { description: SSE snapshot and agent/status/approval events }
+        "200": { description: "SSE snapshot and agent/status/approval/clarification_required/clarification_resolved events. Required carries clarification; resolved carries id." }
   /api/v1/sessions/{id}/messages:
     post:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
         "202": { description: Prompt accepted }
+        "409": { description: A turn revert is writing files }
   /api/v1/sessions/{id}/steer:
     post:
       parameters:
@@ -206,12 +219,137 @@ paths:
       responses:
         "200": { description: Approval decision accepted }
         "404": { description: Approval no longer pending }
+  /api/v1/sessions/{id}/skills:
+    get:
+      description: Skills the composer offers as `/skill:<name>` (empty when skill commands are disabled).
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      responses:
+        "200":
+          description: Skills by name
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+  /api/v1/workspace/skills:
+    get:
+      description: >-
+        Skills for a folder without a session yet. Uses an open session in the same folder; otherwise resolves
+        the folder's skill resources as a session would, without extensions (plugin skills are then missing).
+      parameters:
+        - { name: cwd, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: "Same shape as /api/v1/sessions/{id}/skills" }
+        "403": { description: Folder is not a known workspace }
+  /api/v1/mcp:
+    get:
+      description: >-
+        MCP servers of the host process (one list, written by the session that started last), including servers
+        disabled in config.toml.
+      responses:
+        "200":
+          description: Server status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        status: { type: string, enum: [connecting, connected, failed, disabled] }
+                        toolCount: { type: integer }
+                        error: { type: string }
+  /api/v1/sessions/{id}/turns/{turnId}/revert:
+    post:
+      description: >-
+        Reverse-apply the edit/write patches (tool result `details.patch`) of the turn that starts at
+        user entry `turnId`. All or nothing over the patched files. Hunks may have moved (later edits elsewhere
+        in the file) and their edge context may have changed, but the lines the turn changed must be intact.
+        Successful edit/write calls without a patch (large or binary files) are left as they are and listed in
+        `skipped`; changes made through `bash` are not tracked. A `stepcode-web.turn-revert` custom message then
+        tells the model which files were restored and lists the turn in the snapshot's `revertedTurns`.
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+        - { name: turnId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Files restored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  snapshot: { type: object }
+                  paths: { type: array, items: { type: string } }
+                  skipped:
+                    type: array
+                    items:
+                      type: object
+                      required: [path, reason]
+                      properties:
+                        path: { type: string }
+                        reason: { type: string, enum: [too_large, binary, unreadable, unknown] }
+        "409":
+          description: The revert was refused and nothing was written.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error: { type: string }
+                  code: { type: string, enum: [busy, reverted, empty, missing, conflict] }
+                  path: { type: string, description: The file that blocked it (missing, conflict) }
   /api/v1/sessions/{id}/policy:
     patch:
       parameters:
         - { $ref: "#/components/parameters/SessionId" }
       responses:
         "200": { description: Persisted Step permission preset }
+  /api/v1/sessions/{id}/clarifications/response:
+    post:
+      parameters:
+        - { $ref: "#/components/parameters/SessionId" }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, cancelled]
+              properties:
+                id: { type: string }
+                cancelled: { type: boolean }
+                answers:
+                  description: Required unless cancelled. One reply per question, in request order.
+                  type: array
+                  items:
+                    type: object
+                    required: [id]
+                    properties:
+                      id: { type: string }
+                    oneOf:
+                      - properties: { optionIndex: { type: integer, minimum: 0 } }
+                        required: [optionIndex]
+                      - properties: { text: { type: string, minLength: 1 } }
+                        required: [text]
+                      - properties: { skipped: { const: true } }
+                        required: [skipped]
+      responses:
+        "200": { description: Response accepted; resumes the existing clarify_user call }
+        "400": { description: Invalid or incomplete answers; request remains pending }
+        "404": { description: Request no longer pending in this session }
   /api/v1/sessions/{id}/model:
     patch:
       parameters:
@@ -232,6 +370,52 @@ paths:
         "200": { description: Workspace file contents }
 components:
   schemas:
+    ApprovalRequest:
+      type: object
+      required: [id, sessionId, toolName, message, createdAt]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        toolName: { type: string }
+        message: { type: string, description: Original confirmation diagnostics }
+        reason: { type: string, description: Specific policy reason without call and batch diagnostics }
+        createdAt: { type: number }
+        input:
+          type: object
+          additionalProperties: true
+          description: Full captured arguments for displaying the command without clipping
+        preview:
+          type: object
+          properties:
+            path: { type: string }
+            before: { type: string }
+            after: { type: string }
+    ClarificationRequest:
+      type: object
+      required: [id, sessionId, questions]
+      properties:
+        id: { type: string }
+        sessionId: { type: string }
+        questions:
+          type: array
+          items:
+            type: object
+            required: [id, label, question, options, allowFreeform]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              question: { type: string }
+              reason: { type: string }
+              allowFreeform: { type: boolean }
+              options:
+                type: array
+                items:
+                  type: object
+                  required: [label, value]
+                  properties:
+                    label: { type: string }
+                    value: { type: string }
+                    description: { type: string }
     LoginReport:
       description: |
         Where the model credential comes from. Never contains the credential.

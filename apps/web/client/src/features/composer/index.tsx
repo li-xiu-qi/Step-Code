@@ -6,16 +6,18 @@
 
 import "./composer.css";
 
-import { type FormEvent, type ReactNode, useRef, useState } from "react";
+import { type FormEvent, type ReactNode, useCallback, useRef, useState } from "react";
 import { interruptCurrent } from "../../state/session";
-import { useAppStore } from "../../state/store";
+import { getState, setUi, useAppStore } from "../../state/store";
 import { Icon } from "../../ui";
 import { AttachControls, AttachmentList } from "./Attachments";
 import { sendMessage } from "./actions";
+import { ClarificationPanel } from "./ClarificationPanel";
 import { ModelMenu } from "./ModelMenu";
 import { ModeMenu } from "./ModeMenu";
 import { PolicyMenu } from "./PolicyMenu";
 import { PromptInput, resizePrompt } from "./PromptInput";
+import { type SlashItem, SlashMenu, type SlashMenuHandle, slashQuery } from "./SlashMenu";
 import { UsageMenu } from "./UsageMenu";
 
 export interface ComposerProps {
@@ -34,6 +36,8 @@ export function Composer({ workspaceControl }: ComposerProps) {
 	const form = useRef<HTMLFormElement | null>(null);
 	const prompt = useRef<HTMLTextAreaElement | null>(null);
 	const [openMenu, setOpenMenu] = useState<ComposerMenu | null>(null);
+	const [query, setQuery] = useState<string | null>(null);
+	const slash = useRef<SlashMenuHandle | null>(null);
 	const status = useAppStore((state) => state.current?.status);
 	const waiting = status === "waiting";
 
@@ -43,12 +47,40 @@ export function Composer({ workspaceControl }: ComposerProps) {
 		onClose: () => setOpenMenu((value) => (value === name ? null : value)),
 	});
 
+	const onValueInput = (value: string) => {
+		const next = slashQuery(value);
+		setQuery(next);
+		const view = getState().ui.slashMenu;
+		if (next !== null) setUi({ slashMenu: "commands" });
+		else if (view) setUi({ slashMenu: null });
+	};
+
+	const pickSlash = useCallback((item: SlashItem) => {
+		const textarea = prompt.current;
+		if (!textarea) return;
+		setQuery(null);
+		if (item.kind === "mcp") {
+			// A status view, not a prompt: nothing is sent.
+			textarea.value = "";
+			setUi({ slashMenu: "mcp" });
+		} else {
+			// The kernel expands `/skill:<name> [request]` into the skill's instructions on send.
+			textarea.value = `/skill:${item.key} `;
+			setUi({ slashMenu: null });
+		}
+		resizePrompt(textarea);
+		textarea.focus();
+		textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+	}, []);
+
 	const submit = (event: FormEvent<HTMLFormElement>) => {
 		event.preventDefault();
 		const textarea = prompt.current;
 		if (!textarea) return;
 		const text = textarea.value.trim();
 		if (!text) return;
+		setQuery(null);
+		setUi({ slashMenu: null });
 		textarea.value = "";
 		resizePrompt(textarea);
 		void sendMessage(text).then((sent) => {
@@ -60,8 +92,16 @@ export function Composer({ workspaceControl }: ComposerProps) {
 
 	return (
 		<form className="composer" id="composer" ref={form} onSubmit={submit}>
+			<SlashMenu handle={slash} query={query} promptRef={prompt} onPick={pickSlash} />
+			<ClarificationPanel />
 			<div className="composer-card">
-				<PromptInput promptRef={prompt} disabled={waiting} onSubmit={() => form.current?.requestSubmit()} />
+				<PromptInput
+					promptRef={prompt}
+					disabled={waiting}
+					onSubmit={() => form.current?.requestSubmit()}
+					onValueInput={onValueInput}
+					onMenuKey={(key) => slash.current?.key(key) ?? false}
+				/>
 				<AttachmentList />
 				<div className="composer-controls">
 					<AttachControls />

@@ -5,7 +5,7 @@ import { startDraft } from "../../state/session";
 import type { SessionSummary } from "../../state/types";
 import { EmptyState, Icon, IconButton, LEGACY_ICONS } from "../../ui";
 import { openTree } from "../files/actions";
-import { removeWorkspace } from "../workspace/actions";
+import { requestWorkspaceRemoval } from "../workspace/actions";
 import { toggleProjectFolded } from "./actions";
 import { SessionRow } from "./SessionRow";
 
@@ -13,8 +13,6 @@ export interface ProjectGroupProps {
 	readonly cwd: string;
 	readonly sessions: readonly SessionSummary[];
 	readonly folded: boolean;
-	/** A registered workspace; one without conversations can be removed from here. */
-	readonly registered: boolean;
 	/** Session ids hidden by the tag filter. */
 	readonly hiddenIds: ReadonlySet<string>;
 	/** The whole group is hidden by the tag filter. */
@@ -22,7 +20,7 @@ export interface ProjectGroupProps {
 }
 
 /** `section.project-group[data-cwd]` (legacy `renderSessionLists`, 848-885). */
-export function ProjectGroup({ cwd, sessions, folded, registered, hiddenIds, filteredOut }: ProjectGroupProps) {
+export function ProjectGroup({ cwd, sessions, folded, hiddenIds, filteredOut }: ProjectGroupProps) {
 	const t = useT();
 	const action = (run: () => void) => (event: MouseEvent<HTMLButtonElement>) => {
 		event.stopPropagation();
@@ -57,16 +55,14 @@ export function ProjectGroup({ cwd, sessions, folded, registered, hiddenIds, fil
 					>
 						<Icon {...LEGACY_ICONS.plus} />
 					</IconButton>
-					{registered && !sessions.length ? (
-						<IconButton
-							className="project-action remove-workspace"
-							data-tooltip={t("removeWorkspace")}
-							aria-label={t("removeWorkspace")}
-							onClick={action(() => void removeWorkspace(cwd))}
-						>
-							<Icon name="close-sm" size="sm" />
-						</IconButton>
-					) : null}
+					<IconButton
+						className="project-action remove-workspace"
+						data-tooltip={t("removeWorkspace")}
+						aria-label={t("removeWorkspace")}
+						onClick={action(() => requestWorkspaceRemoval(cwd))}
+					>
+						<Icon name="close-sm" size="sm" />
+					</IconButton>
 				</span>
 			</div>
 			<div className="project-sessions">

@@ -151,11 +151,13 @@ export function ConversationList() {
 					<IconButton
 						className={view.showArchived ? "list-mode-button list-action active" : "list-mode-button list-action"}
 						id="archiveToggle"
-						data-tooltip={view.showArchived ? t("conversations") : t("archivedTooltip")}
-						aria-label="查看归档"
+						data-tooltip={view.showArchived ? t("archiveClose") : t("archivedTooltip")}
+						aria-label={view.showArchived ? t("archiveClose") : t("archivedTooltip")}
+						aria-pressed={view.showArchived}
 						onClick={toggleArchived}
 					>
-						<Icon name="archive" size="sm" />
+						{/* While the archive is shown, the same button closes it. */}
+						<Icon name={view.showArchived ? "close" : "archive"} size="sm" />
 					</IconButton>
 				</div>
 			</div>

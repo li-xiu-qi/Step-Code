@@ -31,10 +31,14 @@ export interface PromptInputProps {
 	readonly disabled: boolean;
 	/** Enter without Shift, outside an IME composition. */
 	readonly onSubmit: () => void;
+	/** Every edit, with the new value (the slash menu follows it). */
+	readonly onValueInput?: (value: string) => void;
+	/** Offered each key first; returning true means an open menu used it. */
+	readonly onMenuKey?: (key: string) => boolean;
 }
 
 /** Uncontrolled, as legacy: the value is read and reset through the ref on send. */
-export function PromptInput({ promptRef, disabled, onSubmit }: PromptInputProps) {
+export function PromptInput({ promptRef, disabled, onSubmit, onValueInput, onMenuKey }: PromptInputProps) {
 	const t = useT();
 	const ime = useImeGuard();
 	const focusRequest = useAppStore((state) => state.ui.promptFocusRequest);
@@ -42,8 +46,12 @@ export function PromptInput({ promptRef, disabled, onSubmit }: PromptInputProps)
 		if (focusRequest) promptRef.current?.focus();
 	}, [focusRequest, promptRef]);
 	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-		if (event.key !== "Enter" || event.shiftKey) return;
 		if (ime.isComposing(event)) return;
+		if (!event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey && onMenuKey?.(event.key)) {
+			event.preventDefault();
+			return;
+		}
+		if (event.key !== "Enter" || event.shiftKey) return;
 		event.preventDefault();
 		onSubmit();
 	};
@@ -55,7 +63,10 @@ export function PromptInput({ promptRef, disabled, onSubmit }: PromptInputProps)
 			placeholder={t("messagePlaceholder")}
 			disabled={disabled}
 			{...ime.handlers}
-			onInput={(event) => resizePrompt(event.currentTarget)}
+			onInput={(event) => {
+				resizePrompt(event.currentTarget);
+				onValueInput?.(event.currentTarget.value);
+			}}
 			onKeyDown={onKeyDown}
 		/>
 	);

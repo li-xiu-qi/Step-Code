@@ -96,13 +96,39 @@ export interface SessionSnapshot extends SessionSummary {
 	readonly models?: readonly ModelInfo[];
 	/** Tool calls still waiting for a verdict; the stream only announces each one once. */
 	readonly pendingApprovals?: readonly ApprovalRequest[];
+	readonly pendingClarifications?: readonly ClarificationRequest[];
+	/** User entry ids of turns whose file changes were reverted (runtime.ts `revertTurn`). */
+	readonly revertedTurns?: readonly string[];
 }
+
+export interface ClarificationQuestion {
+	readonly id: string;
+	readonly label: string;
+	readonly question: string;
+	readonly reason?: string;
+	readonly options: readonly { readonly label: string; readonly value: string; readonly description?: string }[];
+	readonly allowFreeform: boolean;
+}
+
+export interface ClarificationRequest {
+	readonly id: string;
+	readonly sessionId: string;
+	readonly questions: readonly ClarificationQuestion[];
+}
+
+export type ClarificationReply = { readonly id: string } & (
+	| { readonly optionIndex: number }
+	| { readonly text: string }
+	| { readonly skipped: true }
+);
 
 export interface ApprovalRequest {
 	readonly id: string;
 	readonly sessionId: string;
 	readonly toolName: string;
 	readonly message: string;
+	readonly input?: Readonly<Record<string, unknown>>;
+	readonly reason?: string;
 	readonly createdAt: number;
 	readonly preview?: {
 		readonly path?: string;
@@ -117,10 +143,12 @@ export interface MessageTimelineItem {
 	readonly entryId?: string;
 	readonly role: string;
 	readonly content: string;
-	/** Live turn only: the model is reasoning and has not produced text yet. */
-	readonly thinking?: boolean;
+	/** Images attached to a user message; a message can be images only. */
+	readonly images?: number;
 	readonly usage?: Usage;
 	readonly timestamp?: string;
+	/** The model request failed (assistant `stopReason: "error"`); the provider's message. */
+	readonly error?: string;
 }
 
 export type ToolState = "pending" | "completed" | "failed";
@@ -135,6 +163,25 @@ export interface ToolTimelineItem {
 	/** Full arguments and result, shown when the row is expanded. */
 	readonly inputDetail?: string;
 	readonly outputDetail?: string;
+	/** A successful edit/write: its path argument and the unified patch from the result `details.patch`. */
+	readonly change?: FileChange;
+}
+
+/** Why an edit/write has no patch (host `SkippedChange.reason`). */
+export type UntrackedReason = "too_large" | "binary" | "unreadable" | "unknown";
+
+export interface FileChange {
+	readonly path: string;
+	/** Unified patch, LF. Absent when none was recorded; then `untracked` says why. */
+	readonly patch?: string;
+	readonly untracked?: UntrackedReason;
+}
+
+/** Response of `POST /sessions/{id}/turns/{turnId}/revert`. */
+export interface TurnRevertResult {
+	readonly snapshot: SessionSnapshot;
+	readonly paths: readonly string[];
+	readonly skipped: ReadonlyArray<{ readonly path: string; readonly reason: UntrackedReason }>;
 }
 
 export interface ApprovalTimelineItem {
@@ -150,6 +197,8 @@ export interface WebWorkspace {
 	readonly name: string;
 	/** False when the directory has since been moved or deleted. */
 	readonly available: boolean;
+	/** Removed from workspace navigation without deleting sessions. */
+	readonly hidden?: boolean;
 }
 
 export interface LoginReport {
@@ -198,4 +247,18 @@ export interface Attachment {
 	readonly mimeType: string;
 	readonly data: string;
 	readonly kind: "image" | "text";
+}
+
+/** GET /api/v1/sessions/:id/skills and /api/v1/workspace/skills (runtime.ts `WebSkill`). */
+export interface WebSkill {
+	readonly name: string;
+	readonly description: string;
+}
+
+/** GET /api/v1/mcp (coding-agent `StepMcpStatus`). */
+export interface McpServerStatus {
+	readonly name: string;
+	readonly status: "connecting" | "connected" | "failed" | "disabled";
+	readonly toolCount: number;
+	readonly error?: string;
 }

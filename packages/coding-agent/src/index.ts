@@ -367,9 +367,12 @@ export {
 export { BUILTIN_SLASH_COMMANDS } from "./core/slash-commands.ts";
 export { createSyntheticSourceInfo } from "./core/source-info.ts";
 export {
+	detectLineEnding,
 	type EditDiffResult,
 	generateDiffString,
 	generateUnifiedPatch,
+	normalizeToLF,
+	restoreLineEndings,
 } from "./core/tools/edit-diff.ts";
 // Tools
 export {
@@ -427,10 +430,12 @@ export {
 	truncateLine,
 	truncateTail,
 	type WriteOperations,
+	type WriteToolDetails,
 	type WriteToolInput,
 	type WriteToolOptions,
 	withFileMutationQueue,
 } from "./core/tools/index.ts";
+export { resolveToCwd } from "./core/tools/path-utils.ts";
 export { getTextOutput, renderToolPath, replaceTabs } from "./core/tools/render-utils.ts";
 export {
 	getProjectTrustOptions,
@@ -624,7 +629,12 @@ export {
 	type StepLoginMethod,
 	type StepLoginStatus,
 } from "./step/login-status.ts";
-export { ambiguousPluginServerNames, resolveStepMcpServer } from "./step/mcp.ts";
+export {
+	ambiguousPluginServerNames,
+	getStepMcpStatuses,
+	resolveStepMcpServer,
+	type StepMcpStatus,
+} from "./step/mcp.ts";
 export { describeStepMcpImportOutcome, runStepMcpImportPrompt } from "./step/mcp-import-prompt.ts";
 export { hasStoredMcpOAuthCredential, loginMcpServer, logoutMcpServer } from "./step/mcp-oauth.ts";
 export { resolveStepLoginProfiles } from "./step/onboarding.ts";

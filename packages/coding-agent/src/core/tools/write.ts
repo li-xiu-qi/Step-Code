@@ -5,7 +5,9 @@ import { dirname } from "path";
 import { type Static, Type } from "typebox";
 import { keyHint } from "../../render/keybinding-hints.ts";
 import { getLanguageFromPath, highlightCode, type Theme } from "../../theme/theme.ts";
+import { splitBom } from "../../utils/text.ts";
 import type { ToolDefinition, ToolRenderResultOptions } from "../extensions/types.ts";
+import { detectLineEnding, generateUnifiedPatch, normalizeToLF } from "./edit-diff.ts";
 import { withFileMutationQueue } from "./file-mutation-queue.ts";
 import { resolveToCwd } from "./path-utils.ts";
 import { normalizeDisplayText, renderToolPath, replaceTabs, str } from "./render-utils.ts";
@@ -22,6 +24,25 @@ export const writeToolSystemPromptContribution = {
 } as const;
 
 export type WriteToolInput = Static<typeof writeSchema>;
+
+/** Files above this size get no patch: the diff would bloat the session file. */
+export const MAX_WRITE_PATCH_BYTES = 1_000_000;
+
+/**
+ * What a write replaced, so a client can show the diff and undo it. Recorded
+ * inside the file mutation queue, so the previous content is exactly what this
+ * write overwrote, even after an earlier call in the same batch.
+ */
+export interface WriteToolDetails {
+	/** Unified patch from the previous text to the written text, both LF without BOM (like `edit`'s patch). */
+	patch?: string;
+	/** The file did not exist before the write. */
+	created?: boolean;
+	/** Line ending and BOM of the overwritten file; reversing the patch alone loses them. */
+	previous?: { lineEnding: "\r\n" | "\n"; bom: boolean };
+	/** Why no patch was recorded. */
+	untracked?: "too_large" | "binary" | "unreadable";
+}
 
 /**
  * Pluggable operations for the write tool.
@@ -41,6 +62,36 @@ const defaultWriteOperations: WriteOperations = {
 	writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
 	mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => {}),
 };
+
+function lfText(content: string): string {
+	return normalizeToLF(splitBom(content).text);
+}
+
+async function describeWrite(
+	ops: WriteOperations,
+	absolutePath: string,
+	path: string,
+	content: string,
+): Promise<WriteToolDetails> {
+	if (Buffer.byteLength(content, "utf-8") > MAX_WRITE_PATCH_BYTES) return { untracked: "too_large" };
+	if (!ops.readFile) return { untracked: "unreadable" };
+	let raw: Buffer | string;
+	try {
+		raw = await ops.readFile(absolutePath);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") return { untracked: "unreadable" };
+		return { patch: generateUnifiedPatch(path, "", lfText(content)), created: true };
+	}
+	const size = typeof raw === "string" ? Buffer.byteLength(raw, "utf-8") : raw.length;
+	if (size > MAX_WRITE_PATCH_BYTES) return { untracked: "too_large" };
+	const previous = typeof raw === "string" ? raw : raw.toString("utf-8");
+	if (previous.includes("\u0000")) return { untracked: "binary" };
+	const { bom, text } = splitBom(previous);
+	return {
+		patch: generateUnifiedPatch(path, normalizeToLF(text), lfText(content)),
+		previous: { lineEnding: detectLineEnding(text), bom: bom !== "" },
+	};
+}
 
 export interface WriteToolOptions {
 	/** Custom operations for file writing. Default: local filesystem */
@@ -189,7 +240,7 @@ function formatWriteResult(
 export function createWriteToolDefinition(
 	cwd: string,
 	options?: WriteToolOptions,
-): ToolDefinition<typeof writeSchema, undefined> {
+): ToolDefinition<typeof writeSchema, WriteToolDetails | undefined> {
 	const ops = options?.operations ?? defaultWriteOperations;
 	return {
 		name: "write",
@@ -222,13 +273,17 @@ export function createWriteToolDefinition(
 				await ops.mkdir(dir);
 				throwIfAborted();
 
+				// Read what is about to be replaced, inside the queue and after approval.
+				const details = await describeWrite(ops, absolutePath, path, content);
+				throwIfAborted();
+
 				// Write the file contents.
 				await ops.writeFile(absolutePath, content);
 				throwIfAborted();
 
 				return {
 					content: [{ type: "text", text: `Successfully wrote ${content.length} bytes to ${path}` }],
-					details: undefined,
+					details,
 				};
 			});
 		},

@@ -1,0 +1,30 @@
+/*
+ * The gradient is three times the text width with the band in its middle, so
+ * moving the background from 100% to 0% sweeps the band left to right over the
+ * middle half of each cycle and leaves a short pause before the next sweep.
+ */
+@keyframes sweep {
+	from {
+		background-position: 100% 0;
+	}
+
+	to {
+		background-position: 0 0;
+	}
+}
+
+.root {
+	display: inline-block;
+	background: linear-gradient(
+		90deg,
+		var(--ink-2) 0%,
+		var(--ink-2) 42%,
+		var(--line-strong) 50%,
+		var(--ink-2) 58%,
+		var(--ink-2) 100%
+	);
+	background-size: 300% 100%;
+	background-clip: text;
+	color: transparent;
+	animation: sweep 2s linear infinite;
+}

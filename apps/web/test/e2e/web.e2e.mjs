@@ -5,7 +5,7 @@
  * server process, so it covers what the unit tests cannot: the launch-link
  * sign-in, lazy tree loading, the preview panel, and the workspace dialog.
  *
- * No model credentials are needed: nothing here sends a message. Chrome is
+ * No real model credentials are needed: message tests use a local mock provider. Chrome is
  * located through CHROME_PATH or the usual install locations; without one the
  * suite is skipped rather than failed.
  */
@@ -28,6 +28,7 @@ import { tmpdir } from "node:os"
 import { delimiter, dirname, join } from "node:path"
 import { after, before, test } from "node:test"
 import { fileURLToPath } from "node:url"
+import { clarificationCompletion } from "./clarification-provider.mjs"
 
 const webRoot = fileURLToPath(new URL("../..", import.meta.url))
 
@@ -296,7 +297,7 @@ before(async () => {
 
   // A stored plan credential, so the login report and the settings section can
   // be asserted without touching the real credential file. The token is not
-  // valid and is never used: nothing in this suite sends a message.
+  // valid outside this fixture; message tests send it only to the local mock.
   const agentDir = join(base, "agent")
   authPath = join(base, "stepcode", "auth.json")
   await mkdir(agentDir, { recursive: true })
@@ -330,18 +331,22 @@ before(async () => {
       response.end(JSON.stringify({ error: "bad token" }))
       return
     }
+    if (request.url?.endsWith("/chat/completions")) {
+      void clarificationCompletion(request, response);
+      return;
+    }
     const payload = request.url?.endsWith("/models")
       ? {
           data: [
             {
               id: "e2e-model-large",
-              model_type: "large_language_model",
+              model_type: "大语言模型",
               max_input_tokens: 128000,
               enable_reason: true,
             },
             {
               id: "e2e-model-small",
-              model_type: "large_language_model",
+              model_type: "大语言模型",
               max_input_tokens: 32000,
               enable_reason: false,
             },
@@ -876,12 +881,14 @@ test(
       ),
       {
         workspaces: [extra],
+        removedWorkspaces: [],
       },
     )
 
     const removed = await browser.run(`
-		window.confirm = () => true;
 		$("#projectGroups .remove-workspace").click();
+		await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+		$("#removeWorkspaceConfirm").click();
 		await until(() => !projects().length, "workspace to be removed");
 		return projects();
 	`)
@@ -934,6 +941,7 @@ test(
       ),
       {
         workspaces: [extra],
+        removedWorkspaces: [],
       },
     )
 
@@ -957,10 +965,11 @@ test(
 
     const removed = await browser.run(`
 		$("#fileTreeBack").click();
-		window.confirm = () => true;
 		$("#projectGroups .remove-workspace").click();
+		await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+		$("#removeWorkspaceConfirm").click();
 		await until(() => !projects().length, "workspace to be removed");
-		return (await (await fetch("/api/v1/workspaces")).json()).workspaces;
+		return (await (await fetch("/api/v1/workspaces")).json()).workspaces.filter(workspace => !workspace.hidden);
 	`)
     assert.deepEqual(removed, [])
     assert.ok(
@@ -1000,3 +1009,224 @@ test(
     })
   },
 )
+
+test("clarification pages restore after reload, preserve drafts and auto-submit the last answer", { skip }, async () => {
+  const id = await browser.run(`
+    const session = await (await fetch("/api/v1/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: ${JSON.stringify(workspace)} }) })).json();
+    await fetch("/api/v1/sessions/" + session.id + "/policy", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ preset: "approve-for-me" }) });
+    await fetch("/api/v1/sessions/" + session.id + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "clarification fixture" }) });
+    await until(async () => {
+      const snapshot = await (await fetch("/api/v1/sessions/" + session.id)).json();
+      if (snapshot.status === "completed" || snapshot.status === "failed") throw new Error(JSON.stringify(snapshot));
+      return snapshot.pendingClarifications?.length;
+    }, "pending clarification");
+    return session.id;
+  `);
+  await browser.goto(`${origin}/`);
+  await browser.run(`
+    const row = await until(() => $("[data-session-id='${id}']"), "session row"); row.click();
+    await until(() => !$(".clarification-panel").hidden, "restored questions");
+  `);
+  const answered = await browser.run(`
+    const page = () => $(".clarification-page").textContent.trim();
+    const first = page();
+    $("[aria-label='下一题']").click();
+    await until(() => page() === "2 of 3", "page 2");
+    $(".clarification-custom button").click();
+    const editor = await until(() => $(".clarification-custom textarea"), "custom editor");
+    editor.value = "自定义范围"; editor.dispatchEvent(new Event("input"));
+    $("[aria-label='上一题']").click();
+    await until(() => page() === "1 of 3", "page 1");
+    $(".clarification-option").click();
+    await until(() => page() === "2 of 3", "advance");
+    const draft = $(".clarification-custom button").textContent;
+    $(".clarification-custom button").click();
+    await until(() => $(".clarification-custom textarea"), "custom editor again");
+    const text = $(".clarification-custom textarea");
+    text.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, isComposing: true }));
+    const imePage = page();
+    text.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await until(() => page() === "3 of 3", "last page");
+    let replies = 0;
+    const original = window.fetch;
+    window.fetch = (...args) => { if (String(args[0]).includes("/clarifications/response")) replies++; return original(...args); };
+    const choice = $(".clarification-option"); choice.click(); choice.click();
+    await until(() => $(".clarification-panel").hidden, "automatic submission");
+    window.fetch = original;
+    await until(async () => (await (await fetch("/api/v1/sessions/${id}")).json()).status === "completed", "agent resume and write");
+    return { first, draft, imePage, replies };
+  `);
+  assert.deepEqual(answered, { first: "1 of 3", draft: "自定义范围", imePage: "2 of 3", replies: 1 });
+  if (!existsSync(join(workspace, "clarification-result.txt"))) {
+    assert.fail(JSON.stringify(await browser.run(`return await (await fetch("/api/v1/sessions/${id}")).json();`)));
+  }
+  const content = await readFile(join(workspace, "clarification-result.txt"), "utf8");
+  assert.match(content, /answer: main/);
+  assert.match(content, /answer: 自定义范围\nsource: freeform/);
+  assert.match(content, /answer: key/);
+});
+
+test("clarification close cancels the pending tool and a single freeform answer auto-sends", { skip }, async () => {
+  await browser.run(`
+    const active = $(".session-row.active").dataset.sessionId;
+    await fetch("/api/v1/sessions/" + active + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "clarification fixture again" }) });
+    await until(() => !$(".clarification-panel").hidden, "new questions");
+    $("[aria-label='关闭问题']").click();
+    await until(() => $(".clarification-panel").hidden, "cancelled card");
+    await until(async () => (await (await fetch("/api/v1/sessions/" + active)).json()).status === "completed", "cancelled turn settles");
+    await fetch("/api/v1/sessions/" + active + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "freeform-only" }) });
+    await until(() => !$(".clarification-panel").hidden && $(".clarification-custom textarea"), "freeform-only question");
+    const editor = $(".clarification-custom textarea"); editor.value = "single answer"; editor.dispatchEvent(new Event("input"));
+    await until(() => !$(".clarification-confirm").disabled, "custom input update");
+    editor.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await until(() => $(".clarification-panel").hidden, "single automatic send");
+    await until(async () => (await (await fetch("/api/v1/sessions/" + active)).json()).status === "completed", "single turn settles");
+  `);
+});
+
+test("paging ahead never submits unanswered questions, and failed auto-send can retry", { skip }, async () => {
+  const result = await browser.run(`
+    const active = $(".session-row.active").dataset.sessionId;
+    await fetch("/api/v1/sessions/" + active + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "clarification fixture retry" }) });
+    await until(() => !$(".clarification-panel").hidden, "questions");
+    const page = () => $(".clarification-page").textContent.trim();
+    $("[aria-label='下一题']").click(); await until(() => page() === "2 of 3", "second");
+    $("[aria-label='下一题']").click(); await until(() => page() === "3 of 3", "third");
+    $(".clarification-option").click(); await until(() => page() === "1 of 3", "first unanswered");
+    const pending = (await (await fetch("/api/v1/sessions/" + active)).json()).pendingClarifications.length;
+    $(".clarification-skip").click(); await until(() => page() === "2 of 3", "skip advances");
+    const original = window.fetch; let attempts = 0;
+    window.fetch = (...args) => {
+      if (String(args[0]).includes("/clarifications/response") && ++attempts === 1) return Promise.resolve(new Response(JSON.stringify({ error: "fixture retry" }), { status: 500, headers: { "content-type": "application/json" } }));
+      return original(...args);
+    };
+    $(".clarification-option").click();
+    await until(() => !$(".clarification-confirm").disabled && $("#errorToast").textContent.includes("fixture retry"), "retryable failure");
+    const kept = !$(".clarification-panel").hidden;
+    $(".clarification-confirm").click(); await until(() => $(".clarification-panel").hidden, "retry succeeds");
+    window.fetch = original;
+    await until(async () => (await (await fetch("/api/v1/sessions/" + active)).json()).status === "completed", "turn settles");
+    return { pending, kept, attempts };
+  `);
+  assert.deepEqual(result, { pending: 1, kept: true, attempts: 2 });
+  assert.match(await readFile(join(workspace, "clarification-result.txt"), "utf8"), /source: skipped/);
+});
+
+test("approval cards show complete commands, restore on reload, and offer only deny/session allow", { skip }, async () => {
+  const id = await browser.run(`
+    const session = await (await fetch("/api/v1/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: ${JSON.stringify(workspace)} }) })).json();
+    await fetch("/api/v1/sessions/" + session.id + "/policy", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ preset: "ask" }) });
+    await fetch("/api/v1/sessions/" + session.id + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "approval-fixture" }) });
+    await until(async () => (await (await fetch("/api/v1/sessions/" + session.id)).json()).pendingApprovals?.length, "pending command");
+    return session.id;
+  `);
+  await browser.goto(`${origin}/`);
+  const shown = await browser.run(`
+    const row = await until(() => $("[data-session-id='${id}']"), "approval session"); row.click();
+    const card = await until(() => $(".approval-content"), "restored approval");
+    await until(() => !$(".approval-expand-row").hidden, "long command expand");
+    const background = getComputedStyle($(".approval")).backgroundColor;
+    const labels = $$(".approval-actions button").map(button => button.textContent.trim());
+    const noLogs = !$(".approval").textContent.includes("Call:") && !$(".approval").textContent.includes("undefined") && !$(".approval").textContent.includes("Batch calls");
+    const clippedHeight = card.clientHeight;
+    $(".approval-expand").click(); await until(() => card.classList.contains("expanded"), "expanded command");
+    const expandedHeight = card.clientHeight;
+    const full = card.textContent.includes("# exact-end-of-command");
+    $(".approval-expand").click(); await until(() => !card.classList.contains("expanded"), "collapse command");
+    let replies = 0; const original = window.fetch;
+    window.fetch = (...args) => { if (String(args[0]).includes("/approvals/decision")) replies++; return original(...args); };
+    const allow = $(".approval [data-verdict='approve_for_session']"); allow.click(); allow.click();
+    await until(async () => (await (await fetch("/api/v1/sessions/${id}")).json()).status === "completed", "allowed command settles");
+    window.fetch = original;
+    return { background, labels, noLogs, expanded: expandedHeight > clippedHeight, full, replies };
+  `);
+  assert.deepEqual(shown, { background: "rgb(255, 255, 255)", labels: ["拒绝", "本会话允许"], noLogs: true, expanded: true, full: true, replies: 1 });
+  assert.match(await readFile(join(workspace, "approval-result.txt"), "utf8"), /approval command preview/);
+  await browser.run(`
+    await fetch("/api/v1/sessions/${id}/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "approval-fixture-remembered" }) });
+    await until(async () => (await (await fetch("/api/v1/sessions/${id}")).json()).status === "completed" && $(".approval") === null, "later command reuses session grant");
+  `);
+  assert.match(await readFile(join(workspace, "approval-remembered.txt"), "utf8"), /approval command preview/);
+});
+
+test("denying an approval never executes the command", { skip }, async () => {
+  const id = await browser.run(`
+    const session = await (await fetch("/api/v1/sessions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ cwd: ${JSON.stringify(workspace)} }) })).json();
+    await fetch("/api/v1/sessions/" + session.id + "/policy", { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ preset: "ask" }) });
+    await fetch("/api/v1/sessions/" + session.id + "/messages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: "approval-fixture-denied" }) });
+    await until(async () => (await (await fetch("/api/v1/sessions/" + session.id)).json()).pendingApprovals?.length, "pending denied command");
+    return session.id;
+  `);
+  await browser.goto(`${origin}/`);
+  await browser.run(`
+    const row = await until(() => $("[data-session-id='${id}']"), "denied session"); row.click();
+    await until(() => $(".approval [data-verdict='deny']"), "deny button");
+    $(".approval [data-verdict='deny']").click();
+    await until(async () => (await (await fetch("/api/v1/sessions/${id}")).json()).status === "completed", "denied turn settles");
+  `);
+  assert.equal(existsSync(join(workspace, "approval-denied.txt")), false);
+});
+
+test("workspaces with chats can be removed through the dialog, retained after reload and restored", { skip }, async () => {
+  const before = await browser.run(`
+    const session = $(".session-row.active").dataset.sessionId;
+    const project = $("#projectGroups .project-group");
+    const button = project.querySelector(".remove-workspace");
+    button.focus(); button.click();
+    await until(() => !$("#removeWorkspaceModal").hidden, "removal dialog");
+    const title = $("#removeWorkspaceTitle").textContent;
+    const description = $("#removeWorkspaceDescription").textContent;
+    const focused = document.activeElement.id;
+    $("#removeWorkspaceCancel").click();
+    await until(() => $("#removeWorkspaceModal").hidden, "cancel");
+    const restoredFocus = document.activeElement === button;
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen");
+    return { session, title, description, focused, restoredFocus };
+  `);
+  assert.equal(before.title, "移除 project?");
+  assert.match(before.description, /文件和现有聊天不会被删除/);
+  assert.equal(before.focused, "removeWorkspaceCancel");
+  assert.equal(before.restoredFocus, true);
+  await browser.send("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  await browser.send("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+  const removed = await browser.run(`
+    await until(() => $("#removeWorkspaceModal").hidden, "Escape closes dialog");
+    const button = $("#projectGroups .remove-workspace");
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen for close");
+    $("#removeWorkspaceModal header button").click();
+    await until(() => $("#removeWorkspaceModal").hidden, "close button");
+    button.click(); await until(() => !$("#removeWorkspaceModal").hidden, "reopen for confirm");
+    const original = window.fetch; let calls = 0;
+    window.fetch = (...args) => {
+      if (String(args[0]).startsWith("/api/v1/workspaces?") && args[1]?.method === "DELETE") {
+        calls++;
+        if (calls === 1) return Promise.resolve(new Response(JSON.stringify({error:"removal fixture retry"}), {status:500, headers:{"content-type":"application/json"}}));
+      }
+      return original(...args);
+    };
+    $("#removeWorkspaceConfirm").click();
+    await until(() => !$("#removeWorkspaceConfirm").disabled && $("#errorToast").textContent.includes("removal fixture retry"), "retryable failure");
+    const kept = !$("#removeWorkspaceModal").hidden;
+    $("#removeWorkspaceConfirm").click(); $("#removeWorkspaceConfirm").click();
+    await until(() => $("#removeWorkspaceModal").hidden && !projects().length, "confirmed removal");
+    window.fetch = original;
+    return { calls, kept, session: $("#recentTasks .session-row.active")?.dataset.sessionId };
+  `);
+  assert.deepEqual(removed, { calls: 2, kept: true, session: before.session });
+  await browser.goto(`${origin}/`);
+  const reloaded = await browser.run(`
+    await until(() => $("#recentTasks .session-row"), "retained chats after reload");
+    return { projects: projects(), session: (await (await fetch("/api/v1/sessions/${before.session}")).json()).id };
+  `);
+  assert.deepEqual(reloaded, { projects: [], session: before.session });
+  assert.ok(existsSync(join(workspace, "README.md")));
+  await browser.run(`
+    await fetch("/api/v1/workspaces", { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify({path:${JSON.stringify(workspace)}}) });
+  `);
+  await browser.goto(`${origin}/`);
+  const restored = await browser.run(`
+    await until(() => $("#projectGroups .session-row"), "project restored with chats");
+    return projects();
+  `);
+  assert.deepEqual(restored, [workspace]);
+});
