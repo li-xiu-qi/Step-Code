@@ -2,7 +2,7 @@ import { SkillIgnoreMatcher } from "@step-harness/agent-core";
 import { existsSync, readdirSync, readFileSync, statSync } from "fs";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.ts";
-import { parseFrontmatter } from "../utils/frontmatter.ts";
+import { formatFrontmatterError, parseFrontmatter } from "../utils/frontmatter.ts";
 import { canonicalizePath, resolvePath } from "../utils/paths.ts";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
@@ -76,12 +76,15 @@ function validateName(name: string): string[] {
 
 /**
  * Validate description per Agent Skills spec.
+ *
+ * `filePath` keeps the "missing description" diagnostic self-contained so it stays actionable
+ * wherever diagnostics are surfaced.
  */
-function validateDescription(description: unknown): string[] {
+function validateDescription(description: unknown, filePath: string): string[] {
 	const errors: string[] = [];
 
 	if (typeof description !== "string" || description.trim() === "") {
-		errors.push("description is required");
+		errors.push(`${filePath}: frontmatter is missing "description" — add e.g. description: "..."`);
 	} else if (description.length > MAX_DESCRIPTION_LENGTH) {
 		errors.push(`description exceeds ${MAX_DESCRIPTION_LENGTH} characters (${description.length})`);
 	}
@@ -263,8 +266,11 @@ function loadSkillFromFile(
 		({ frontmatter } = parseFrontmatter<SkillFrontmatter>(rawContent));
 	} catch (error) {
 		if (isDeclaredSkill) {
-			const message = error instanceof Error ? error.message : "failed to parse skill file";
-			diagnostics.push({ type: "warning", message, path: filePath });
+			diagnostics.push({
+				type: "warning",
+				message: formatFrontmatterError(filePath, error, rawContent),
+				path: filePath,
+			});
 		}
 		return { skill: null, diagnostics };
 	}
@@ -279,7 +285,7 @@ function loadSkillFromFile(
 	const parentDirName = basename(skillDir);
 
 	// Validate description
-	const descErrors = validateDescription(description);
+	const descErrors = validateDescription(description, filePath);
 	for (const error of descErrors) {
 		diagnostics.push({ type: "warning", message: error, path: filePath });
 	}
@@ -357,6 +363,14 @@ function escapeXml(str: string): string {
 		.replace(/'/g, "&apos;");
 }
 
+function hasSameContent(a: string, b: string): boolean {
+	try {
+		return readFileSync(a).equals(readFileSync(b));
+	} catch {
+		return false;
+	}
+}
+
 export interface LoadSkillsOptions {
 	/** Working directory for project-local skills. */
 	cwd: string;
@@ -400,6 +414,12 @@ export function loadSkills(options: LoadSkillsOptions): LoadSkillsResult {
 
 			const existing = skillMap.get(skill.name);
 			if (existing) {
+				// Tools that install one skill for several agents (e.g. ~/.agents/skills and
+				// ~/.claude/skills) often copy instead of symlink. An identical copy changes
+				// nothing about what gets loaded, so skip it as silently as a symlink.
+				if (hasSameContent(existing.filePath, skill.filePath)) {
+					continue;
+				}
 				collisionDiagnostics.push({
 					type: "collision",
 					message: `name "${skill.name}" collision`,
