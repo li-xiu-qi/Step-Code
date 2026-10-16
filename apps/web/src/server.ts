@@ -32,6 +32,24 @@ import {
 	type WebAttachment,
 	WebSessionStore,
 } from "./runtime.ts";
+import {
+	addMarketplace,
+	createSkill,
+	deleteMcpServer,
+	deleteSkill,
+	importSkill,
+	installPlugin,
+	listMcpServers,
+	listPlugins,
+	listSkills,
+	removeMarketplace,
+	removePlugin,
+	SettingsError,
+	saveMcpServer,
+	setMcpServerEnabled,
+	setSkillEnabled,
+	updateMarketplace,
+} from "./settings.ts";
 import { TurnRevertError } from "./turn-changes.ts";
 import { WORKSPACES_FILE, WorkspaceRegistry } from "./workspaces.ts";
 
@@ -270,6 +288,101 @@ async function pickWorkspaceFolder(request: IncomingMessage, response: ServerRes
 	}
 }
 
+/**
+ * `/api/v1/settings/*`: the settings screen's MCP, plugin, marketplace and skill
+ * management (see settings.ts). `parts` starts after `settings`, URL-decoded.
+ */
+async function settingsRoute(
+	parts: string[],
+	method: string,
+	url: URL,
+	request: IncomingMessage,
+	response: ServerResponse,
+): Promise<void> {
+	const [area, name, action] = parts;
+	try {
+		if (area === "mcp") {
+			if (!name && method === "GET") return json(response, 200, { servers: await listMcpServers() });
+			if (!name && method === "POST") {
+				const input = await body(request);
+				if (typeof input.name !== "string") return error(response, 400, "name is required");
+				saveMcpServer(input.name.trim(), input.config, { replace: false });
+				return json(response, 201, { ok: true });
+			}
+			if (name && !action && method === "PUT") {
+				saveMcpServer(name, (await body(request)).config, { replace: true });
+				return json(response, 200, { ok: true });
+			}
+			if (name && !action && method === "PATCH") {
+				const input = await body(request);
+				if (typeof input.enabled !== "boolean") return error(response, 400, "enabled must be a boolean");
+				await setMcpServerEnabled(name, input.enabled);
+				return json(response, 200, { ok: true });
+			}
+			if (name && !action && method === "DELETE") {
+				deleteMcpServer(name);
+				return json(response, 200, { ok: true });
+			}
+		}
+		if (area === "plugins") {
+			if (!name && method === "GET") return json(response, 200, await listPlugins());
+			if (!name && method === "POST") {
+				const input = await body(request);
+				if (typeof input.name !== "string" || !input.name.trim()) return error(response, 400, "name is required");
+				const marketplace = typeof input.marketplace === "string" ? input.marketplace : undefined;
+				return json(response, 201, await installPlugin(input.name.trim(), marketplace));
+			}
+			if (name && !action && method === "DELETE") {
+				await removePlugin(name);
+				return json(response, 200, { ok: true });
+			}
+		}
+		if (area === "marketplaces") {
+			if (!name && method === "POST") {
+				const input = await body(request);
+				if (typeof input.source !== "string" || !input.source.trim()) {
+					return error(response, 400, "source is required");
+				}
+				return json(response, 201, await addMarketplace(input.source));
+			}
+			if (name && action === "update" && method === "POST")
+				return json(response, 200, await updateMarketplace(name));
+			if (name && !action && method === "DELETE") {
+				await removeMarketplace(name);
+				return json(response, 200, { ok: true });
+			}
+		}
+		if (area === "skills") {
+			if (!name && method === "GET") return json(response, 200, { skills: await listSkills() });
+			if (!name && method === "POST") {
+				const input = await body(request);
+				await createSkill({ name: input.name, description: input.description, instructions: input.instructions });
+				return json(response, 201, { ok: true });
+			}
+			if (name === "import" && !action && method === "POST") {
+				return json(response, 201, await importSkill((await body(request)).path));
+			}
+			// A skill's id is its file path, so it travels in the body or the query, not the URL path.
+			if (!name && method === "PATCH") {
+				const input = await body(request);
+				if (typeof input.id !== "string" || typeof input.enabled !== "boolean") {
+					return error(response, 400, "id and enabled are required");
+				}
+				await setSkillEnabled(input.id, input.enabled);
+				return json(response, 200, { ok: true });
+			}
+			if (!name && method === "DELETE") {
+				await deleteSkill(url.searchParams.get("id") ?? "");
+				return json(response, 200, { ok: true });
+			}
+		}
+		return error(response, 404, "Not found");
+	} catch (caught) {
+		if (caught instanceof SettingsError) return error(response, caught.status, caught.message);
+		throw caught;
+	}
+}
+
 async function serveWorkspaceImage(response: ServerResponse, cwd: string, inputPath: string): Promise<void> {
 	const file = await readWorkspaceFile(cwd, inputPath);
 	if (file.kind !== "image") return error(response, 415, "Only images can be served raw");
@@ -376,8 +489,17 @@ const server = createServer(async (request, response) => {
 				return error(response, 400, caught instanceof Error ? caught.message : String(caught));
 			}
 		}
+		if (parts[2] === "settings" && parts[3]) {
+			return await settingsRoute(parts.slice(3).map(decodeURIComponent), method, url, request, response);
+		}
 		if (parts[2] === "mcp" && parts.length === 3 && method === "GET") {
 			return json(response, 200, { servers: mcpStatuses() });
+		}
+		if (parts[2] === "models" && parts.length === 3 && method === "GET") {
+			// Unknown folders fall back to the launch folder: project settings are
+			// read from the cwd, so an arbitrary path must not pick which ones.
+			const cwd = (await knownWorkspace(url.searchParams.get("cwd"))) ?? defaultWorkspace();
+			return json(response, 200, await store.draftModels(cwd));
 		}
 		if (parts[2] === "sessions" && parts.length === 3 && method === "GET") {
 			const sessions = await store.list();

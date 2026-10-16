@@ -214,6 +214,29 @@ paths:
         - { name: q, in: query, required: true, schema: { type: string } }
       responses:
         "200": { description: "Name matches below the workspace root: entries and truncated" }
+  /api/v1/models:
+    get:
+      description: >-
+        Model panel of an unsaved draft: the catalog and the model and thinking level a new session in `cwd` would
+        start on (settings default, then the Step product default). An unknown `cwd` falls back to the launch folder.
+        Each model carries `thinkingLevels` so the panel can show effort for a model picked before the session exists.
+      parameters:
+        - { name: cwd, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Draft model source
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models, availableThinkingLevels]
+                properties:
+                  model:
+                    type: object
+                    properties: { provider: { type: string }, id: { type: string } }
+                  thinkingLevel: { type: string }
+                  availableThinkingLevels: { type: array, items: { type: string } }
+                  models: { type: array, items: { type: object } }
   /api/v1/sessions:
     get:
       responses:
@@ -348,6 +371,249 @@ paths:
                         status: { type: string, enum: [connecting, connected, failed, disabled] }
                         toolCount: { type: integer }
                         error: { type: string }
+  /api/v1/settings/mcp:
+    get:
+      description: >-
+        MCP servers as the settings screen lists them: the user's entries from config.toml, then the servers
+        installed plugins declare, each with the host's last known connection state (absent until a session
+        has started the server).
+      responses:
+        "200":
+          description: Configured servers
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  servers:
+                    type: array
+                    items: { $ref: "#/components/schemas/SettingsMcpServer" }
+    post:
+      description: Add a server to the global config. A name already in use is a 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, config]
+              properties:
+                name: { type: string }
+                config: { $ref: "#/components/schemas/McpServerConfig" }
+      responses:
+        "201": { description: Added }
+        "400": { description: Invalid name or declaration }
+        "409": { description: Name already used }
+  /api/v1/settings/mcp/{name}:
+    parameters:
+      - { name: name, in: path, required: true, schema: { type: string } }
+    put:
+      description: Replace the declaration of an existing user server. Plugins' servers cannot be replaced.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [config]
+              properties:
+                config: { $ref: "#/components/schemas/McpServerConfig" }
+      responses:
+        "200": { description: Saved }
+        "400": { description: Invalid declaration }
+        "404": { description: No such user server }
+    patch:
+      description: >-
+        Turn a server on or off. For a plugin server this writes an override entry
+        (`mcp_servers."<plugin>__<server>" = { enabled = false }`) that discovery honours, and removes it again
+        when switching back on.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Updated }
+        "404": { description: No such server }
+    delete:
+      description: Remove a user server from the global config.
+      responses:
+        "200": { description: Removed }
+        "404": { description: No such user server }
+  /api/v1/settings/plugins:
+    get:
+      description: >-
+        Installed user plugins, every configured marketplace's plugins with an `installed` flag, and the
+        marketplaces themselves. The built-in marketplace is materialized first.
+      responses:
+        "200":
+          description: Plugin catalog
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  installed:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        version: { type: string }
+                        description: { type: string }
+                        mcpServers: { type: array, items: { type: string } }
+                        warnings: { type: array, items: { type: string } }
+                  available:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        description: { type: string }
+                        marketplace: { type: string }
+                        installed: { type: boolean }
+                  marketplaces:
+                    type: array
+                    items: { $ref: "#/components/schemas/SettingsMarketplace" }
+                  warnings: { type: array, items: { type: string } }
+    post:
+      description: Install a marketplace plugin into the user plugin root.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                marketplace: { type: string }
+      responses:
+        "201": { description: Installed, with the installer's warnings }
+        "404": { description: No such marketplace plugin }
+        "409": { description: Already installed, or the copy failed }
+  /api/v1/settings/plugins/{id}:
+    delete:
+      description: Uninstall a user plugin by its manifest id.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Uninstalled }
+        "404": { description: Not installed }
+  /api/v1/settings/marketplaces:
+    post:
+      description: >-
+        Add a marketplace from a local folder, a git URL or `owner/repo` (cloned from GitHub). A clone can take
+        a minute; the response arrives when it finishes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source]
+              properties:
+                source: { type: string }
+      responses:
+        "201": { description: Added, with any warnings }
+        "400": { description: The source could not be acquired }
+  /api/v1/settings/marketplaces/{name}:
+    delete:
+      description: Remove a marketplace checkout. Installed plugins stay.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Removed }
+        "400": { description: Unknown or built-in marketplace }
+  /api/v1/settings/marketplaces/{name}/update:
+    post:
+      description: Pull a git marketplace. A local checkout reports that it cannot be updated automatically.
+      parameters:
+        - { name: name, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Updated, with any warnings }
+        "400": { description: Unknown, built-in or non-git marketplace }
+  /api/v1/settings/skills:
+    get:
+      description: >-
+        User-scope skills (from `~/.stepcode/agent/skills`, `~/.stepcode/skills`, `~/.agents/skills`,
+        `~/.claude/skills` and configured packages) and the skills installed plugins contribute. Only those in
+        StepCode's own skill folders are deletable; plugin and package skills are read-only.
+      responses:
+        "200":
+          description: Skills
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  skills:
+                    type: array
+                    items: { $ref: "#/components/schemas/SettingsSkill" }
+    post:
+      description: Create `SKILL.md` in `<agentDir>/skills/<name>`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, description]
+              properties:
+                name: { type: string }
+                description: { type: string }
+                instructions: { type: string }
+      responses:
+        "201": { description: Created }
+        "400": { description: Invalid name, or a missing description }
+        "409": { description: A skill with that name already exists }
+    patch:
+      description: >-
+        Turn a user skill on or off by writing a `+path` / `-path` entry into the global `skills` setting.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id, enabled]
+              properties:
+                id: { type: string }
+                enabled: { type: boolean }
+      responses:
+        "200": { description: Updated }
+        "404": { description: Not a user skill that can be switched }
+    delete:
+      description: >-
+        Delete a skill from StepCode's own skill folders (`id` is its file path) and drop its enable/disable
+        entry. A skill in a shared folder such as `~/.claude/skills` is a 403.
+      parameters:
+        - { name: id, in: query, required: true, schema: { type: string } }
+      responses:
+        "200": { description: Deleted }
+        "403": { description: Outside StepCode's own skill folders }
+        "404": { description: Not a user skill }
+  /api/v1/settings/skills/import:
+    post:
+      description: Copy a local folder containing `SKILL.md` into the user skill folder.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [path]
+              properties:
+                path: { type: string }
+      responses:
+        "201": { description: Imported, with the skill's name }
+        "400": { description: No SKILL.md in that folder, or an invalid skill name }
+        "409": { description: A skill with that name already exists }
   /api/v1/sessions/{id}/turns/{turnId}/revert:
     post:
       description: >-
@@ -447,6 +713,66 @@ paths:
         "200": { description: Workspace file contents }
 components:
   schemas:
+    McpServerConfig:
+      description: "A server declaration as `config.toml` stores it: `command` for stdio, `url` for streamable HTTP."
+      type: object
+      properties:
+        command: { type: string }
+        args: { type: array, items: { type: string } }
+        cwd: { type: string }
+        env: { type: object, additionalProperties: { type: string } }
+        url: { type: string }
+        http_headers: { type: object, additionalProperties: { type: string } }
+        bearer_token_env_var: { type: string }
+        env_http_headers:
+          description: Header name to the environment variable that holds its value.
+          type: object
+          additionalProperties: { type: string }
+        startup_timeout_sec: { type: number }
+        tool_timeout_sec: { type: number }
+        enabled_tools:
+          description: Allow list; when set, only these tools are reachable (an empty list allows none).
+          type: array
+          items: { type: string }
+        disabled_tools: { type: array, items: { type: string } }
+        oauth:
+          type: object
+          properties:
+            client_id: { type: string }
+            client_secret: { type: string }
+            scopes: { type: array, items: { type: string } }
+            callback_port: { type: integer }
+        enabled: { type: boolean }
+    SettingsMcpServer:
+      type: object
+      properties:
+        name: { type: string }
+        source: { type: string, enum: [user, plugin] }
+        pluginName: { type: string }
+        transport: { type: string, enum: [stdio, http] }
+        enabled: { type: boolean }
+        config: { $ref: "#/components/schemas/McpServerConfig" }
+        status: { type: string, enum: [connecting, connected, failed, disabled] }
+        toolCount: { type: integer }
+        error: { type: string }
+    SettingsMarketplace:
+      type: object
+      properties:
+        name: { type: string }
+        kind: { type: string, enum: [builtin, git, local] }
+        origin: { type: string, nullable: true }
+    SettingsSkill:
+      type: object
+      properties:
+        id: { type: string, description: Absolute path of the skill file }
+        name: { type: string }
+        description: { type: string }
+        source: { type: string, enum: [user, plugin] }
+        pluginName: { type: string }
+        location: { type: string, description: Display path, with the home directory shortened to `~` }
+        enabled: { type: boolean }
+        toggleable: { type: boolean }
+        deletable: { type: boolean }
     ApprovalRequest:
       type: object
       required: [id, sessionId, toolName, message, createdAt]

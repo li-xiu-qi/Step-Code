@@ -21,6 +21,7 @@ import type {
 	BootstrapPayload,
 	ClarificationRequest,
 	ContentPart,
+	DraftModels,
 	FileChange,
 	LoginReport,
 	SessionEntry,
@@ -260,7 +261,11 @@ export function renderSnapshot(snapshot: SessionSnapshot): void {
 			policiesCache: snapshot.policies ?? state.policiesCache,
 			draftCwd: snapshot.cwd,
 			draftPolicy: snapshot.permissionPreset || "ask",
-			draftModel: snapshot.model ? modelKey(snapshot.model) : "",
+			// Not the snapshot's model: a draft that inherited it would PATCH a new
+			// session back onto whatever the last opened session ran (and persist it
+			// as the global default). An explicit pick is persisted by the server.
+			draftModel: "",
+			draftThinking: "",
 			statusById: mapWith(state.statusById, snapshot.id, snapshot.status),
 			unreadById: mapWith(state.unreadById, snapshot.id, false),
 			sessions: mergeSessionSummary(state.sessions, snapshot),
@@ -577,25 +582,47 @@ export function requestPromptFocus(): void {
  */
 export function startDraft(cwd: string = getState().bootstrapCwd): void {
 	closeStream();
+	const draftCwd = cwd || getState().bootstrapCwd;
 	setState((state) => {
 		const current = state.current;
 		return {
 			draftPolicy: current ? current.permissionPreset || state.draftPolicy : state.draftPolicy,
-			draftModel: current ? (current.model ? modelKey(current.model) : state.draftModel) : state.draftModel,
+			// A new conversation starts on the server's default model and effort
+			// (see renderSnapshot); only a pick made in this draft overrides them.
+			draftModel: current ? "" : state.draftModel,
+			draftThinking: current ? "" : state.draftThinking,
 			current: null,
 			timelineItems: [],
 			pendingTurn: null,
-			draftCwd: cwd || state.bootstrapCwd,
+			draftCwd,
 		};
 	});
 	// A new conversation replaces whatever covers the pane (cron / plugin market).
 	setUi({ midView: null });
 	requestPromptFocus();
+	void loadDraftModels(draftCwd);
 }
 
 /**
- * The current session, creating it from the draft (cwd, policy, model) when
- * there is none yet (legacy `createSessionIfNeeded`, 3153-3182).
+ * Ask the host which model a new session in `cwd` would start on, so the
+ * draft's model panel shows it (and its catalog and effort) before the first
+ * send. Fetched per draft: a sign-in or an explicit pick changes the answer.
+ */
+async function loadDraftModels(cwd: string): Promise<void> {
+	try {
+		const draftModels = await api<DraftModels>(`/api/v1/models?cwd=${encodeURIComponent(cwd)}`);
+		// A late answer for a draft the user already left must not repaint another one.
+		const state = getState();
+		if (!state.current && state.draftCwd === cwd) setState({ draftModels });
+	} catch (error) {
+		showError(errorMessage(error));
+	}
+}
+
+/**
+ * The current session, creating it from the draft (cwd, policy, model,
+ * thinking level) when there is none yet (legacy `createSessionIfNeeded`,
+ * 3153-3182).
  */
 export async function createSessionIfNeeded(): Promise<SessionSnapshot> {
 	const state = getState();
@@ -616,6 +643,14 @@ export async function createSessionIfNeeded(): Promise<SessionSnapshot> {
 				modelId,
 			});
 		}
+	}
+	// Always send a draft's pick: the host clamps it to the model the session
+	// ended up on, the same way the draft panel did (`clampEffort`). Skipping
+	// a level the model lacks would start the session on the default instead.
+	if (state.draftThinking && snapshot.thinkingLevel !== state.draftThinking) {
+		snapshot = await apiSend<SessionSnapshot>(`/api/v1/sessions/${snapshot.id}/thinking`, "PATCH", {
+			level: state.draftThinking,
+		});
 	}
 	renderSnapshot(snapshot);
 	connectStream(snapshot.id);

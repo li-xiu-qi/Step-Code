@@ -17,8 +17,28 @@ describe("max thinking level", () => {
 			maxTokens: 4096,
 		};
 
-		expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high"]);
+		expect(getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high"]);
 		expect(clampThinkingLevel(model, "max")).toBe("high");
+		// An unmapped minimal is not offered; a saved minimal moves up to low.
+		expect(clampThinkingLevel(model, "minimal")).toBe("low");
+	});
+
+	it("offers minimal only when the model maps it", () => {
+		const model: Model<"openai-completions"> = {
+			id: "minimal-mapped",
+			name: "Minimal Mapped",
+			api: "openai-completions",
+			provider: "test",
+			baseUrl: "https://example.com/v1",
+			reasoning: true,
+			thinkingLevelMap: { minimal: "minimal" },
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 128000,
+			maxTokens: 4096,
+		};
+
+		expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high"]);
 	});
 
 	it("supports a hole between high and max", () => {
@@ -36,7 +56,7 @@ describe("max thinking level", () => {
 			maxTokens: 4096,
 		};
 
-		expect(getSupportedThinkingLevels(model)).toEqual(["off", "minimal", "low", "medium", "high", "max"]);
+		expect(getSupportedThinkingLevels(model)).toEqual(["off", "low", "medium", "high", "max"]);
 		expect(clampThinkingLevel(model, "xhigh")).toBe("max");
 	});
 });

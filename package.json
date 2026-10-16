@@ -46,6 +46,7 @@
 		"step": "tsx --tsconfig tsconfig.json apps/cli/src/main.ts",
 		"web": "pnpm --filter @step-harness/web build:client && STEPCODE_WEB_CWD=\"$PWD\" pnpm --filter @step-harness/web dev",
 		"desktop": "pnpm --filter @step-harness/desktop start",
+		"web:watch": "node scripts/web-watch.mjs",
 		"web:build": "pnpm --filter @step-harness/web build",
 		"web:serve": "pnpm run web:build && node apps/web/dist/server.js",
 		"test": "pnpm run test:scripts && pnpm -r --if-present test",

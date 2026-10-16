@@ -22,6 +22,16 @@ export interface ModelInfo extends ModelRef {
 	readonly maxTokens?: number;
 	readonly input?: readonly string[];
 	readonly cost?: unknown;
+	/** Thinking levels this model supports (runtime.ts `projectModel`). */
+	readonly thinkingLevels?: readonly string[];
+}
+
+/** GET /api/v1/models: what a new session in a folder would start on (runtime.ts `predictDraftModel`). */
+export interface DraftModels {
+	readonly model?: ModelRef;
+	readonly thinkingLevel?: string;
+	readonly availableThinkingLevels: readonly string[];
+	readonly models: readonly ModelInfo[];
 }
 
 export interface PolicyPreset {
@@ -277,4 +287,80 @@ export interface McpServerStatus {
 	readonly status: "connecting" | "connected" | "failed" | "disabled";
 	readonly toolCount: number;
 	readonly error?: string;
+}
+
+/**
+ * A server declaration as `config.toml` stores it (`StepMcpServerConfig`):
+ * `command` for stdio, `url` for streamable HTTP.
+ */
+export interface McpServerConfig {
+	readonly command?: string;
+	readonly args?: readonly string[];
+	readonly cwd?: string;
+	readonly env?: Readonly<Record<string, string>>;
+	readonly url?: string;
+	readonly http_headers?: Readonly<Record<string, string>>;
+	readonly bearer_token_env_var?: string;
+	readonly env_http_headers?: Readonly<Record<string, string>>;
+	readonly startup_timeout_sec?: number;
+	readonly tool_timeout_sec?: number;
+	readonly enabled_tools?: readonly string[];
+	readonly disabled_tools?: readonly string[];
+	readonly oauth?: {
+		readonly client_id?: string;
+		readonly client_secret?: string;
+		readonly scopes?: readonly string[];
+		readonly callback_port?: number;
+	};
+	readonly enabled?: boolean;
+}
+
+/** `GET /api/v1/settings/mcp` entry (src/settings.ts `WebMcpServer`). */
+export interface SettingsMcpServer {
+	readonly name: string;
+	readonly source: "user" | "plugin";
+	readonly pluginName?: string;
+	readonly transport: "stdio" | "http";
+	readonly enabled: boolean;
+	readonly config?: McpServerConfig;
+	readonly status?: McpServerStatus["status"];
+	readonly toolCount?: number;
+	readonly error?: string;
+}
+
+/** `GET /api/v1/settings/plugins` (src/settings.ts `WebPluginCatalog`). */
+export interface SettingsPluginCatalog {
+	readonly installed: ReadonlyArray<{
+		readonly id: string;
+		readonly name: string;
+		readonly version?: string;
+		readonly description?: string;
+		readonly mcpServers: readonly string[];
+		readonly warnings: readonly string[];
+	}>;
+	readonly available: ReadonlyArray<{
+		readonly name: string;
+		readonly description?: string;
+		readonly marketplace: string;
+		readonly installed: boolean;
+	}>;
+	readonly marketplaces: ReadonlyArray<{
+		readonly name: string;
+		readonly kind: "builtin" | "git" | "local";
+		readonly origin: string | null;
+	}>;
+	readonly warnings: readonly string[];
+}
+
+/** `GET /api/v1/settings/skills` entry (src/settings.ts `WebSkillEntry`). */
+export interface SettingsSkill {
+	readonly id: string;
+	readonly name: string;
+	readonly description: string;
+	readonly source: "user" | "plugin";
+	readonly pluginName?: string;
+	readonly location: string;
+	readonly enabled: boolean;
+	readonly toggleable: boolean;
+	readonly deletable: boolean;
 }

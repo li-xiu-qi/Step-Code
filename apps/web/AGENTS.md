@@ -48,6 +48,7 @@ apps/web/
     files.ts             workspace file tree / read / search
     auth.ts, login.ts    cookie secret, launch-token exchange, credential status, desktop sign-in
     directory-picker.ts  server-side folder chooser
+    settings.ts          settings back end: MCP servers, plugins/marketplaces, skills
     attachments.ts, feedback.ts, banner.ts, bootstrap.ts, writer-lease.ts
   client/
     index.html           <div id="root">, loads /src/main.tsx
@@ -62,7 +63,7 @@ apps/web/
       styles/global.css  design tokens (light/dark), reset, app grid, shared rules, [data-host] rules
       ui/                reusable primitives, one folder each (Component.tsx + Component.module.css), barrel index.ts
       features/<name>/   index.tsx (public slots), actions.ts (state changes), *.tsx, <name>.css
-        composer conversation files login market shell sidebar workspace
+        composer conversation files login market settings shell sidebar workspace
   test/
     *.test.ts            host unit tests (node:test)
     e2e/web.e2e.mjs      builds the client, starts the host, drives headless Chrome
@@ -136,6 +137,11 @@ apps/web/
 - Environment variables: `STEPCODE_WEB_PORT` (default 3077), `STEPCODE_WEB_CWD` (default workspace),
   `STEPCODE_WEB_PUBLIC_DIR` (client directory), `STEPCODE_WEB_AUTH_SECRET`. Document new ones here and in
   `apps/desktop/README.md` if the desktop passes them through.
+- `/api/v1/settings/*` is the settings screen's own surface (MCP servers, plugins, marketplaces, skills). It reads
+  and writes the user's global StepCode configuration through `@step-harness/coding-agent` — the same files
+  `step mcp`, `/plugin` and the TUI resource selector use — and never project scope. Only user-scope state moves;
+  a change reaches a session when that session starts (MCP servers connect at `session_start`, skills load with its
+  resources), so the client says so instead of reloading sessions.
 - Do not depend on `process.cwd()` being the workspace; the desktop starts the server elsewhere (macOS privacy
   blocks a cwd inside `~/Documents`).
 
@@ -146,10 +152,11 @@ Run from the repo root.
 | Command | Use |
 |---|---|
 | `pnpm web` | Build the client, run the host from source with the current folder as workspace (port 3077) |
+| `pnpm web:watch` | Same as `pnpm web`, but rebuilds the client and restarts the host on every source change (web or imported packages); refresh the page to see it. A host restart drops running turns |
 | `pnpm --filter @step-harness/web dev:client` | Vite dev server with HMR, proxies to a host on `STEPCODE_WEB_PORT` (start the host first) |
 | `pnpm --filter @step-harness/web typecheck` | Host and client type check |
 | `pnpm --filter @step-harness/web test` | Host unit tests |
-| `node --import tsx --test test/<name>.test.ts` | One unit test file (from `apps/web/`) |
+| `TSX_TSCONFIG_PATH=../../tsconfig.json node --import tsx --test test/<name>.test.ts` | One unit test file (from `apps/web/`); without the tsconfig, workspace packages resolve to `dist/` and fail |
 | `pnpm --filter @step-harness/web test:e2e` | Client build + e2e in headless Chrome (`CHROME_PATH` to override; skipped without Chrome) |
 | `pnpm run check` | Required before handing back any code change: Biome, guards, type checks, web unit tests, web runtime, browser smoke, desktop type check |
 

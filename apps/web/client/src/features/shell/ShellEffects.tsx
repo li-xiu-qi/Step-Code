@@ -8,9 +8,10 @@ import { useEffect } from "react";
 import { activeCwd, interruptCurrent } from "../../state/session";
 import { getState, setUi } from "../../state/store";
 import { openTree, setPreviewOpen } from "../files/actions";
+import { closeTopmostSettingsLayer } from "../settings/actions";
 import { closeSearch, openSearch } from "../sidebar/actions";
 import { chooseWorkspaceFolder, closeWorkspaceRemoval } from "../workspace/actions";
-import { closePreferenceSubmenus, toggleSidebar, toggleUserMenu, watchSystemTheme } from "./actions";
+import { toggleSidebar, watchSystemTheme } from "./actions";
 
 /**
  * Escape closes the topmost overlay, first match only, and otherwise stops the
@@ -26,11 +27,10 @@ function handleEscape(): void {
 	else if (ui.changesMenu) setUi({ changesMenu: null });
 	else if (ui.searchOpen) closeSearch();
 	else if (ui.workspaceBrowserOpen) setUi({ workspaceBrowserOpen: false });
+	else if (closeTopmostSettingsLayer()) return;
 	else if (ui.workspacePopoverOpen) setUi({ workspacePopoverOpen: false });
 	else if (ui.tagPicker) setUi({ tagPicker: null });
 	else if (ui.sessionMenu) setUi({ sessionMenu: null });
-	else if (ui.preferenceSubmenu) closePreferenceSubmenus();
-	else if (ui.userMenuOpen) toggleUserMenu(false);
 	else if (ui.fileTreeOpen) setUi({ fileTreeOpen: false });
 	else if (ui.midView) setUi({ midView: null });
 	else void interruptCurrent();

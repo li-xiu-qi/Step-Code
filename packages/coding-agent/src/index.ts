@@ -1,5 +1,7 @@
 // Core session management
 
+// What a session would report for a model before one exists (Web drafts).
+export { clampThinkingLevel, getSupportedThinkingLevels } from "@step-harness/providers";
 export { type Args, type Mode, parseArgs } from "./cli/args.ts";
 // -----------------------------------------------------------------------------
 // S4-0 barrel widening: symbols consumed by the interactive UI that moved to the
@@ -244,6 +246,8 @@ export {
 export {
 	defaultModelPerProvider,
 	findExactModelReferenceMatch,
+	findInitialModel,
+	type InitialModelResult,
 	type ModelScopeDiagnostic,
 	type ResolveCliModelResult,
 	type ResolveModelScopeResult,
@@ -446,7 +450,12 @@ export {
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,
 } from "./core/trust-manager.ts";
-export { addUsageToTotals, createUsageTotals, getUsageCostBreakdown } from "./core/usage-totals.ts";
+export {
+	addUsageToTotals,
+	collectSessionUsage,
+	createUsageTotals,
+	getUsageCostBreakdown,
+} from "./core/usage-totals.ts";
 export {
 	createStepExtension,
 	createStepExtensionInline,
@@ -614,6 +623,7 @@ export { STEP_INIT_PROMPT } from "./step/init-prompt.ts";
 export { prepareStepInstallation } from "./step/installation.ts";
 export { maybeUpdateStep, runStepUpdateCommand } from "./step/local-update.ts";
 export {
+	checkStepPlanBeforeInteractive,
 	isStepInteractiveLoginStartup,
 	loginStepInBrowser,
 	loginStepWithApiKey,
@@ -637,8 +647,10 @@ export {
 export {
 	ambiguousPluginServerNames,
 	getStepMcpStatuses,
+	listStepPluginMcpServers,
 	resolveStepMcpServer,
 	type StepMcpStatus,
+	type StepPluginMcpServerEntry,
 } from "./step/mcp.ts";
 export { describeStepMcpImportOutcome, runStepMcpImportPrompt } from "./step/mcp-import-prompt.ts";
 export { hasStoredMcpOAuthCredential, loginMcpServer, logoutMcpServer } from "./step/mcp-oauth.ts";
@@ -667,6 +679,25 @@ export {
 	type StepToolPermissionMode,
 	stepPermissionStateForPreset,
 } from "./step/permissions.ts";
+export {
+	addMarketplaceSource,
+	defaultMarketplaceRoots,
+	defaultStepMarketplacesDir,
+	defaultStepPluginsDir,
+	discoverStepPluginResourcePaths,
+	ensureBuiltinMarketplace,
+	type InstalledStepPlugin,
+	installMarketplacePlugin,
+	listInstalledStepPlugins,
+	listMarketplacePlugins,
+	listMarketplaceSources,
+	type MarketplaceOperationResult,
+	type MarketplacePluginEntry,
+	type MarketplaceSource,
+	removeMarketplaceSource,
+	uninstallPlugin,
+	updateMarketplaceSource,
+} from "./step/plugins.ts";
 export {
 	type CreateStepAgentSessionOptions,
 	type CreateStepAgentSessionServicesOptions,
@@ -783,6 +814,16 @@ export {
 export { buildStepThemeOptions, runStepThemePrompt, type StepThemeOption } from "./step/theme-prompt.ts";
 export { createStepToolProfile } from "./step/tool-profile.ts";
 export { resolveStepTraceHeaderBaseUrls } from "./step/trace-headers.ts";
+export { decodePlanUsage, PlanUsageController, resolvePlanUsageAccount } from "./step/usage/account.ts";
+export { overviewDates, scanUsageOverview } from "./step/usage/activity.ts";
+export type { StepUsageHost } from "./step/usage/commands.ts";
+export type {
+	AccountUsageState,
+	PlanUsageSnapshot,
+	UsageOverview,
+	UsagePresentation,
+	UsageStatus,
+} from "./step/usage/types.ts";
 export {
 	resolveStepCodeVersion,
 	STEPCODE_BUILD_VERSION_ENV,

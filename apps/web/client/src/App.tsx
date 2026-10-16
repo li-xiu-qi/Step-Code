@@ -4,6 +4,7 @@ import { ConversationStream, FeedbackModal, TaskBanner } from "./features/conver
 import { FileTreePanel, PreviewPanel, PreviewShowButton } from "./features/files";
 import { LoginGate } from "./features/login";
 import { CronView, MarketView } from "./features/market";
+import { SettingsView } from "./features/settings";
 import { AuthBanner, ErrorToast, LoggedOutOverlay, ShellEffects, SidebarShowButton, UserArea } from "./features/shell";
 import { SearchModal, SessionMenu, SidebarNav, SidebarResizer, TagPicker } from "./features/sidebar";
 import { RemoveWorkspaceModal, WorkspaceBrowserModal, WorkspaceControl } from "./features/workspace";
@@ -18,12 +19,13 @@ import { IconSprite } from "./ui";
  *
  *   svg.icon-sprite
  *   div.app[.sidebar-hidden][.preview-open][.resizing]  (--sidebar-width, --preview-width)
- *     aside.sidebar      sidebar nav | files tree | shell user area
+ *     aside.sidebar      sidebar nav | files tree | shell user area (account, remote control, settings gear)
  *     #sidebarResizer    sidebar
  *     main.main          shell show button | files show button | conversation banner | market cron/market views | stream
  *                        | .composer-zone > composer form (+ workspace control) | sidebar session menu
  *                        | shell toast + auth banner
  *     aside#previewPanel files
+ *   #settingsView      settings: full-window settings page (menu + page) over the workspace
  *   #tagPicker, #feedbackModal, #searchModal, #workspaceBrowserModal, #removeWorkspaceModal, #loggedOutOverlay
  *   #loginGate         login: Desktop sign-in, above everything while no credential exists
  */
@@ -75,6 +77,7 @@ export function App() {
 				</main>
 				<PreviewPanel />
 			</div>
+			<SettingsView />
 			<TagPicker />
 			<FeedbackModal />
 			<SearchModal />

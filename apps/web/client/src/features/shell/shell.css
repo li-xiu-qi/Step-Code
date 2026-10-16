@@ -1,6 +1,6 @@
 /*
  * Shell styles, ported verbatim from legacy public/styles.css:
- * 179-189 (sidebar show button), 602-673 (user area, settings popover, submenus),
+ * 179-189 (sidebar show button), the sidebar footer (account, remote control, settings gear),
  * 1278-1296 (error toast), 1297-1331 (auth banner), 1389-1415 (logged-out overlay, login rows).
  */
 
@@ -20,24 +20,40 @@
 
 .user-area {
 	position: relative;
+	display: flex;
 	flex: none;
-	padding: 8px;
+	align-items: center;
+	gap: 6px;
+	padding: 10px 10px 12px;
 	border-top: 1px solid var(--line);
 }
-.user-button {
+.user-account {
 	display: flex;
+	flex: 1;
 	align-items: center;
-	gap: 10px;
-	width: 100%;
-	min-height: 44px;
-	padding: 5px 8px;
+	gap: 9px;
+	min-width: 0;
+	height: 40px;
+	padding: 0 8px 0 4px;
 	border-radius: var(--radius-menu);
-	color: var(--ink-2);
+	color: var(--ink);
 	text-align: left;
+	transition: background-color var(--fast);
 }
-.user-button:hover,
-.user-button[aria-expanded="true"] {
+.user-account:hover {
 	background: var(--hover);
+}
+.user-avatar {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	width: 30px;
+	height: 30px;
+	border-radius: 50%;
+	background: var(--ink);
+	color: var(--canvas);
+	font-size: 12px;
+	font-weight: 650;
 }
 .user-name {
 	flex: 1;
@@ -46,96 +62,81 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
-.user-popover {
+.user-actions {
+	display: flex;
+	flex: none;
+	gap: 2px;
+}
+.footer-tip-anchor {
+	position: relative;
+	display: inline-flex;
+}
+.footer-icon-button {
+	display: inline-grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	border-radius: var(--radius-menu);
+	color: var(--ink-2);
+	transition:
+		background-color var(--fast),
+		color var(--fast);
+}
+.footer-icon-button:hover,
+.footer-icon-button:focus-visible {
+	background: var(--hover);
+	color: var(--ink);
+}
+.footer-icon-button[aria-disabled="true"] {
+	cursor: default;
+}
+/* Hover card above the button, right-aligned because the sidebar clips anything past its edge. */
+.footer-tooltip {
 	position: absolute;
-	left: 8px;
-	right: 8px;
-	bottom: 62px;
-	z-index: 12;
-	padding: 7px;
+	right: -4px;
+	bottom: calc(100% + 10px);
+	z-index: 30;
+	display: grid;
+	gap: 3px;
+	width: max-content;
+	max-width: 220px;
+	padding: 10px 14px;
 	border: 1px solid var(--line);
 	border-radius: var(--radius-overlay);
 	background: var(--surface);
 	box-shadow: 0 12px 32px var(--shadow);
-}
-.user-menu-item {
-	display: flex;
-	align-items: center;
-	gap: 10px;
-	width: 100%;
-	min-height: 38px;
-	margin-top: 3px;
-	padding: 0 9px;
-	border-radius: var(--radius-control);
+	color: var(--ink);
+	font-size: 12px;
 	text-align: left;
-	text-decoration: none;
+	opacity: 0;
+	pointer-events: none;
+	transform: translateY(4px);
+	transition:
+		opacity var(--fast),
+		transform var(--fast);
 }
-.user-menu-item:hover {
-	background: var(--hover);
+.footer-tooltip strong {
+	font-size: 13px;
+	font-weight: 650;
 }
-.user-menu-item small {
-	margin-left: auto;
-	color: var(--ink-3);
-	font-size: 10px;
-}
-.user-menu-item > .icon:first-child {
-	color: var(--ink-2);
-}
-.user-menu-item .menu-trailing,
-.user-menu-item .menu-chevron {
-	margin-left: auto;
+.footer-tooltip span {
 	color: var(--ink-3);
 }
-.user-menu-item small + .menu-chevron {
-	margin-left: 2px;
+.footer-tooltip.compact {
+	padding: 6px 11px;
 }
-/* The chevron reads as "opens below" once the list is showing. */
-.user-menu-item .menu-chevron {
-	transition: transform var(--fast);
-}
-.user-menu-item[aria-expanded="true"] .menu-chevron {
-	transform: rotate(90deg);
-}
-.user-menu-item.danger {
-	color: var(--danger);
-}
-/*
- * The choice list unfolds inside the popover rather than beside it: the sidebar
- * clips its children, so anything anchored past its right edge was invisible.
- */
-.user-submenu {
-	margin: 1px 0 3px;
-}
-.user-submenu button {
-	display: flex;
-	align-items: center;
-	width: 100%;
-	min-height: 30px;
-	padding: 0 9px 0 38px;
-	border-radius: var(--radius-input);
-	color: var(--ink-2);
-	text-align: left;
-}
-.user-submenu button:hover {
-	background: var(--hover);
-}
-.user-submenu button i {
-	display: none;
-	width: 7px;
-	height: 7px;
-	margin-left: auto;
-	border-radius: 50%;
-	background: var(--ink);
-}
-.user-submenu button.active i {
-	display: block;
+.footer-tip-anchor:hover .footer-tooltip,
+.footer-icon-button:focus-visible + .footer-tooltip {
+	opacity: 1;
+	transform: translateY(0);
 }
 
+/* Fixed, so the toast also shows above the settings view and its dialogs. */
 .error-toast {
-	position: absolute;
+	position: fixed;
 	right: 20px;
 	bottom: 20px;
-	z-index: 40;
+	z-index: 120;
 	max-width: 390px;
 	padding: 10px 13px;
 	border: 1px solid color-mix(in srgb, var(--danger) 38%, var(--line));
@@ -200,34 +201,6 @@
 	padding: 24px;
 	background: rgb(0 0 0 / 30%);
 	backdrop-filter: blur(4px);
-}
-.user-popover-login {
-	display: grid;
-	gap: 5px;
-	padding: 6px 9px 2px;
-}
-.user-popover-login small {
-	color: var(--ink-3);
-	font-size: 11px;
-}
-.user-popover-login .settings-note {
-	margin-top: 0;
-	color: var(--ink-3);
-	font-size: 10px;
-	line-height: 1.5;
-}
-.settings-login {
-	display: flex;
-	align-items: center;
-	gap: 6px;
-}
-.settings-login code {
-	padding: 4px 7px;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-input);
-	background: var(--code-surface);
-	color: var(--ink-2);
-	font: 11px / 1.4 var(--mono);
 }
 .logged-out-overlay {
 	background: var(--canvas);

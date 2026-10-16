@@ -31,7 +31,9 @@ describe("getSupportedThinkingLevels", () => {
 	});
 
 	it("includes the full extended set for a fully-mapped model", () => {
-		const levels = getSupportedThinkingLevels(responsesModel({ thinkingLevelMap: { xhigh: "xhigh", max: "max" } }));
+		const levels = getSupportedThinkingLevels(
+			responsesModel({ thinkingLevelMap: { minimal: "minimal", xhigh: "xhigh", max: "max" } }),
+		);
 		expect(levels).toEqual(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 	});
 
