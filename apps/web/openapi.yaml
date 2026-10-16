@@ -214,6 +214,29 @@ paths:
         - { name: q, in: query, required: true, schema: { type: string } }
       responses:
         "200": { description: "Name matches below the workspace root: entries and truncated" }
+  /api/v1/models:
+    get:
+      description: >-
+        Model panel of an unsaved draft: the catalog and the model and thinking level a new session in `cwd` would
+        start on (settings default, then the Step product default). An unknown `cwd` falls back to the launch folder.
+        Each model carries `thinkingLevels` so the panel can show effort for a model picked before the session exists.
+      parameters:
+        - { name: cwd, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: Draft model source
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models, availableThinkingLevels]
+                properties:
+                  model:
+                    type: object
+                    properties: { provider: { type: string }, id: { type: string } }
+                  thinkingLevel: { type: string }
+                  availableThinkingLevels: { type: array, items: { type: string } }
+                  models: { type: array, items: { type: object } }
   /api/v1/sessions:
     get:
       responses:

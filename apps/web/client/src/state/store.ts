@@ -5,6 +5,7 @@ import { isDesktopHost } from "../platform/host";
 import type {
 	Attachment,
 	DirectoryListing,
+	DraftModels,
 	LoginReport,
 	PolicyPreset,
 	SessionSnapshot,
@@ -193,8 +194,12 @@ export interface AppState {
 	readonly bootstrapCwd: string;
 	readonly draftCwd: string;
 	readonly draftPolicy: string;
-	/** `${provider}\u0000${modelId}` of the model a new session should use, or "". */
+	/** `${provider}\u0000${modelId}` the user picked for a new session, or "" for the server's default. */
 	readonly draftModel: string;
+	/** Thinking level the user picked for a new session, or "" for the server's default. */
+	readonly draftThinking: string;
+	/** The server's prediction for a new session in `draftCwd` (`GET /api/v1/models`); null until loaded. */
+	readonly draftModels: DraftModels | null;
 	readonly statusById: ReadonlyMap<string, SessionStatus>;
 	readonly unreadById: ReadonlyMap<string, boolean>;
 	readonly foldedProjects: ReadonlySet<string>;
@@ -266,6 +271,8 @@ export function createInitialState(): AppState {
 		draftCwd: "",
 		draftPolicy: "ask",
 		draftModel: "",
+		draftThinking: "",
+		draftModels: null,
 		statusById: new Map(),
 		unreadById: new Map(),
 		foldedProjects: new Set(),

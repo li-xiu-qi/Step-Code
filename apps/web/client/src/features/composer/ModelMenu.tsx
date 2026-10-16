@@ -11,36 +11,30 @@
  * because a catalog of five needs neither and a catalog of fifty needs both.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useT } from "../../i18n";
-import { useAppStore } from "../../state/store";
+import { shallowEqual, useAppStore } from "../../state/store";
 import { selectEffort, selectModel } from "./actions";
 import { ControlMenu } from "./ControlOption";
 import { ModelPanel, type ModelPanelView } from "./ModelPanel";
-import { EMPTY_MODEL_SOURCE, type ModelSource, modelLabel, readPinnedModels, togglePinnedModel } from "./models";
+import { draftModelSource, type ModelSource, modelLabel, readPinnedModels, togglePinnedModel } from "./models";
 import type { ComposerMenuProps } from "./PolicyMenu";
 
 export function ModelMenu({ open, onOpen, onClose }: ComposerMenuProps) {
 	const t = useT();
 	const current = useAppStore((state) => state.current);
+	const draft = useAppStore(
+		(state) => ({ models: state.draftModels, model: state.draftModel, effort: state.draftThinking }),
+		shallowEqual,
+	);
 	const [view, setView] = useState<ModelPanelView>("compact");
 	const [query, setQuery] = useState("");
 	/** Bumped whenever legacy rebuilt (and refocused) the search field. */
 	const [searchEpoch, setSearchEpoch] = useState(0);
 	const [pinned, setPinned] = useState<readonly string[]>(readPinnedModels);
-	/**
-	 * Legacy painted `#modelLabel` from the last snapshot handed to
-	 * `renderModelPicker`: every rendered session snapshot, and `{ models: [] }`
-	 * when the panel was opened in a draft. A draft therefore keeps the previous
-	 * session's label until the panel opens. Before any of that the static
-	 * markup said 默认模型.
-	 */
-	const [labelSource, setLabelSource] = useState<ModelSource | null>(null);
-	useEffect(() => {
-		if (current) setLabelSource(current);
-	}, [current]);
-	const source: ModelSource = current ?? EMPTY_MODEL_SOURCE;
-	const shownLabelSource = current ?? labelSource;
+	// A draft paints the host's prediction for its first session, so the label
+	// and panel show the model and effort that session will actually start on.
+	const source: ModelSource = current ?? draftModelSource(draft.models, draft.model, draft.effort);
 
 	const resetSearch = () => {
 		setQuery("");
@@ -55,7 +49,8 @@ export function ModelMenu({ open, onOpen, onClose }: ComposerMenuProps) {
 			title="模型与思考强度"
 			icon="cube"
 			labelId="modelLabel"
-			label={shownLabelSource ? modelLabel(t, shownLabelSource) : "默认模型"}
+			// Before the draft's prediction arrives there is no model to name yet.
+			label={source.model ? modelLabel(t, source) : "默认模型"}
 			popoverId="modelPopover"
 			open={open}
 			onOpen={() => {
@@ -63,7 +58,6 @@ export function ModelMenu({ open, onOpen, onClose }: ComposerMenuProps) {
 				setView("compact");
 				setQuery("");
 				setPinned(readPinnedModels());
-				if (!current) setLabelSource(EMPTY_MODEL_SOURCE);
 				onOpen();
 			}}
 			onClose={onClose}

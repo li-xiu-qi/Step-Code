@@ -22,6 +22,16 @@ export interface ModelInfo extends ModelRef {
 	readonly maxTokens?: number;
 	readonly input?: readonly string[];
 	readonly cost?: unknown;
+	/** Thinking levels this model supports (runtime.ts `projectModel`). */
+	readonly thinkingLevels?: readonly string[];
+}
+
+/** GET /api/v1/models: what a new session in a folder would start on (runtime.ts `predictDraftModel`). */
+export interface DraftModels {
+	readonly model?: ModelRef;
+	readonly thinkingLevel?: string;
+	readonly availableThinkingLevels: readonly string[];
+	readonly models: readonly ModelInfo[];
 }
 
 export interface PolicyPreset {

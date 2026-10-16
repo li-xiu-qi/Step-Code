@@ -44,14 +44,15 @@ export async function selectPolicy(preset: string): Promise<void> {
 /* ── Model and thinking effort (legacy selectModel / selectEffort, 2746-2776) ── */
 
 /**
- * Apply a model (`${provider}\u0000${id}`). Resolves true when the server
- * returned a new snapshot, so the open panel can repaint as legacy did.
+ * Apply a model (`${provider}\u0000${id}`). Resolves true when the panel should
+ * repaint as legacy did: the server returned a new snapshot, or a draft
+ * recorded the pick for the session its first send creates.
  */
 export async function selectModel(value: string): Promise<boolean> {
 	const [provider, modelId] = value.split("\u0000");
 	setState({ draftModel: value });
 	const current = getState().current;
-	if (!current) return false;
+	if (!current) return true;
 	try {
 		renderSnapshot(
 			await apiSend<SessionSnapshot>(`/api/v1/sessions/${current.id}/model`, "PATCH", { provider, modelId }),
@@ -63,10 +64,13 @@ export async function selectModel(value: string): Promise<boolean> {
 	}
 }
 
-/** Apply a thinking level. Resolves true on success (the panel then closes). */
+/** Apply a thinking level. Resolves true on success (the panel then closes); a draft keeps it for its first send. */
 export async function selectEffort(level: string): Promise<boolean> {
 	const current = getState().current;
-	if (!current) return false;
+	if (!current) {
+		setState({ draftThinking: level });
+		return true;
+	}
 	try {
 		renderSnapshot(await apiSend<SessionSnapshot>(`/api/v1/sessions/${current.id}/thinking`, "PATCH", { level }));
 		return true;

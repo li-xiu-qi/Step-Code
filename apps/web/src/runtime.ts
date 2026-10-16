@@ -6,6 +6,7 @@ import {
 	type AgentSession,
 	type AgentSessionEvent,
 	type AgentSessionRuntime,
+	clampThinkingLevel,
 	createAgentSessionFromServices,
 	createAgentSessionRuntime,
 	createStepAgentSessionServices,
@@ -19,10 +20,13 @@ import {
 	createStepSessionManagerFactory,
 	createStepSettingsManager,
 	createUltraloopOptInExtension,
+	DEFAULT_THINKING_LEVEL,
 	DefaultResourceLoader,
 	type ExtensionUIContext,
+	findInitialModel,
 	getStepAuthPath,
 	getStepMcpStatuses,
+	getSupportedThinkingLevels,
 	type InlineExtension,
 	listAllStepSessions,
 	ModelRuntime,
@@ -38,8 +42,10 @@ import {
 	resolveStepStorageRoot,
 	type SessionEntry,
 	type SessionInfo,
+	STEP_DEFAULT_MODEL,
 	STEP_PERMISSION_PRESETS,
 	STEP_PROVIDER_ID,
+	type StepGlobalDefaults,
 	type StepMcpStatus,
 	type StepPermissionPresetId,
 	type StepSettingsManager,
@@ -209,6 +215,116 @@ function makeExtensions(settingsManager: StepSettingsManager, broker: ApprovalBr
 	];
 }
 
+/** The provider/model a Web session starts on. */
+export interface WebDefaultModel {
+	provider: string;
+	modelId?: string;
+}
+
+/**
+ * Resolve the session default the same way the CLI's `withStepDefaults` does:
+ * config.toml first, then the Step product default when the provider is Step.
+ *
+ * Without the product fallback, a config with no `defaultModel` leaves model
+ * resolution to "first available", which is whatever order `{base}/v1/models`
+ * happens to return (e.g. `step-3.7-flash` instead of `step-5-preview`).
+ */
+export function resolveWebDefaultModel(defaults: StepGlobalDefaults): WebDefaultModel {
+	const provider = defaults.provider ?? STEP_PROVIDER_ID;
+	const modelId = defaults.model ?? (provider === STEP_PROVIDER_ID ? STEP_DEFAULT_MODEL : undefined);
+	return modelId ? { provider, modelId } : { provider };
+}
+
+/** Prefer the default model when the catalog lists it; otherwise the first listed model. */
+export function pickFallbackModel<T extends { provider: string; id: string }>(
+	available: readonly T[],
+	preferred: WebDefaultModel,
+): T | undefined {
+	const match = preferred.modelId
+		? available.find((model) => model.provider === preferred.provider && model.id === preferred.modelId)
+		: undefined;
+	return match ?? available[0];
+}
+
+type CatalogModel = ReturnType<ModelRuntime["getAvailableSnapshot"]>[number];
+
+/** Picker row for one catalog model; `thinkingLevels` lets a draft show effort before a session exists. */
+export function projectModel(model: CatalogModel) {
+	return {
+		provider: model.provider,
+		id: model.id,
+		name: model.name,
+		api: model.api,
+		reasoning: model.reasoning ?? false,
+		contextWindow: model.contextWindow,
+		maxTokens: model.maxTokens,
+		input: model.input,
+		cost: model.cost,
+		thinkingLevels: getSupportedThinkingLevels(model),
+	};
+}
+
+/** What the composer's model panel shows: a session snapshot, or a draft's prediction of one. */
+export interface WebModelSource {
+	model?: { provider: string; id: string };
+	thinkingLevel?: string;
+	availableThinkingLevels: string[];
+	models: ReturnType<typeof projectModel>[];
+}
+
+/**
+ * The model and thinking level a new session in `cwd` would start on.
+ *
+ * Mirrors session creation step by step so a draft can show the real choice
+ * instead of a placeholder: settings default (project, then config.toml), then
+ * the product default via `resolveWebDefaultModel`, resolved by the kernel's
+ * `findInitialModel`; `adoptFallbackModel`'s rule when that resolves nothing
+ * listed; then the session's thinking-level order (per-model, global default,
+ * kernel default), clamped to what the model supports.
+ */
+export async function predictDraftModel(
+	modelRuntime: ModelRuntime,
+	settings: Pick<
+		StepSettingsManager,
+		"getDefaultProvider" | "getDefaultModel" | "getDefaultThinkingLevel" | "getAllModelThinkingLevels"
+	>,
+	globalDefaults: StepGlobalDefaults,
+): Promise<WebModelSource> {
+	const available = modelRuntime.getAvailableSnapshot();
+	const defaults = resolveWebDefaultModel(globalDefaults);
+	const preferred: WebDefaultModel = {
+		provider: settings.getDefaultProvider() ?? defaults.provider,
+		modelId: settings.getDefaultModel() ?? defaults.modelId,
+	};
+	const modelThinkingLevels = settings.getAllModelThinkingLevels();
+	const initial = await findInitialModel({
+		scopedModels: [],
+		isContinuing: false,
+		defaultProvider: preferred.provider,
+		defaultModelId: preferred.modelId,
+		defaultThinkingLevel: settings.getDefaultThinkingLevel(),
+		modelThinkingLevels,
+		modelRuntime,
+	});
+	const resolved = initial.model;
+	const model =
+		resolved && available.some((candidate) => modelsMatch(candidate, resolved))
+			? resolved
+			: pickFallbackModel(available, preferred);
+	const models = available.map(projectModel);
+	if (!model) return { availableThinkingLevels: [], models };
+	const wanted =
+		modelThinkingLevels[`${model.provider}/${model.id}`] ??
+		settings.getDefaultThinkingLevel() ??
+		DEFAULT_THINKING_LEVEL;
+	return {
+		model: { provider: model.provider, id: model.id },
+		thinkingLevel: clampThinkingLevel(model, wanted),
+		availableThinkingLevels: getSupportedThinkingLevels(model),
+		models,
+	};
+}
+
 /** Same provider and model id, which is all a resolved model needs to match. */
 function modelsMatch(left: { provider: string; id: string }, right: { provider: string; id: string }): boolean {
 	return left.provider === right.provider && left.id === right.id;
@@ -357,7 +473,7 @@ export class WebSession {
 			});
 			// Read per session: config.toml can change while the host runs, and the
 			// CLI re-reads it at every launch.
-			const defaults = readGlobalStepDefaults();
+			const defaults = resolveWebDefaultModel(readGlobalStepDefaults());
 			const services = await createStepAgentSessionServices({
 				cwd: options.cwd,
 				agentDir: options.agentDir,
@@ -376,11 +492,11 @@ export class WebSession {
 				sessionManager: options.sessionManager,
 				sessionStartEvent: options.sessionStartEvent,
 				// Same defaults the CLI injects into argv (`withStepDefaults`): the
-				// persisted provider/model from config.toml, with the product provider
-				// as the fallback. The settings manager already carries the persisted
-				// thinking level, so it is not repeated here.
-				defaultProvider: defaults.provider ?? STEP_PROVIDER_ID,
-				...(defaults.model ? { defaultModelId: defaults.model } : {}),
+				// persisted provider/model from config.toml, with the product
+				// provider and model as the fallback. The settings manager already
+				// carries the persisted thinking level, so it is not repeated here.
+				defaultProvider: defaults.provider,
+				...(defaults.modelId ? { defaultModelId: defaults.modelId } : {}),
 				systemPromptProduct: {
 					name: "StepCode",
 					role: "a local coding agent",
@@ -510,8 +626,8 @@ export class WebSession {
 	 * Discovery is a network call with no built-in baseline, so a credential that
 	 * is valid but momentarily unusable leaves the session on the `unknown`
 	 * placeholder. Sending then fails with "No API key found for the selected
-	 * model", which names no provider and hides the real problem. Any model the
-	 * runtime lists is a better answer, and the picker already showed it.
+	 * model", which names no provider and hides the real problem. The default
+	 * model, or else any model the runtime lists, is a better answer.
 	 */
 	private async adoptFallbackModel(session: AgentSession): Promise<void> {
 		const available = this.modelRuntime.getAvailableSnapshot();
@@ -519,7 +635,7 @@ export class WebSession {
 		// including the `unknown` placeholder it falls back to.
 		const current = session.model;
 		if (current && available.some((model) => modelsMatch(model, current))) return;
-		const fallback = available[0];
+		const fallback = pickFallbackModel(available, resolveWebDefaultModel(readGlobalStepDefaults()));
 		if (!fallback) return;
 		try {
 			await session.setModel(fallback);
@@ -715,17 +831,7 @@ export class WebSession {
 			})),
 			thinkingLevel: this.session.thinkingLevel,
 			availableThinkingLevels: this.session.getAvailableThinkingLevels(),
-			models: this.modelRuntime.getAvailableSnapshot().map((model) => ({
-				provider: model.provider,
-				id: model.id,
-				name: model.name,
-				api: model.api,
-				reasoning: model.reasoning ?? false,
-				contextWindow: model.contextWindow,
-				maxTokens: model.maxTokens,
-				input: model.input,
-				cost: model.cost,
-			})),
+			models: this.modelRuntime.getAvailableSnapshot().map(projectModel),
 		};
 	}
 
@@ -866,6 +972,30 @@ export class WebSessionStore {
 		const session = await WebSession.create({ cwd });
 		this.sessions.set(session.id, session);
 		return session;
+	}
+
+	/**
+	 * The model panel of an unsaved draft in `cwd`: the catalog and the model a
+	 * session created there would start on. Built on a fresh runtime per call,
+	 * like a session, so a sign-in or a config.toml edit shows up on the next
+	 * draft without a host restart.
+	 */
+	async draftModels(cwd: string): Promise<WebModelSource> {
+		const authPath = getStepAuthPath();
+		syncStepLoginProfileEndpoint(authPath);
+		const modelRuntime = await ModelRuntime.create({
+			authPath,
+			modelsPath: join(resolveStepConfigRoot(), "models.json"),
+		});
+		modelRuntime.registerProvider(STEP_PROVIDER_ID, createStepProviderConfig());
+		// Let the cache-only refresh that registration schedules settle first;
+		// finishing after the network refresh, it would reset the catalog.
+		await modelRuntime.refresh({ allowNetwork: false }).catch(() => {});
+		await refreshStepModelCatalog(modelRuntime);
+		const settings = createStepSettingsManager(cwd, resolveStepAgentDir(), {
+			configDirName: resolveStepConfigDir(),
+		});
+		return predictDraftModel(modelRuntime, settings, readGlobalStepDefaults());
 	}
 
 	async getOrOpen(id: string): Promise<WebSession> {

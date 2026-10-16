@@ -3,15 +3,60 @@
 import type { TranslateFn } from "../../i18n";
 import { readStorage, STORAGE_KEYS, writeStorage } from "../../lib/storage";
 import { modelKey } from "../../state/session";
-import type { ModelInfo, SessionSnapshot } from "../../state/types";
+import type { DraftModels, ModelInfo, SessionSnapshot } from "../../state/types";
 
 /** How many models the compact view shows before deferring to "more models". */
 export const COMPACT_MODEL_COUNT = 4;
 
-/** What the model panel is painted from: the open session, or `{ models: [] }` in a draft. */
+/** What the model panel is painted from: the open session, or a draft's prediction (`draftModelSource`). */
 export type ModelSource = Pick<SessionSnapshot, "models" | "model" | "thinkingLevel" | "availableThinkingLevels">;
 
 export const EMPTY_MODEL_SOURCE: ModelSource = { models: [] };
+
+/** Kernel thinking levels, lowest first (the order of `EFFORT_LABELS`). */
+const EFFORT_ORDER = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+/**
+ * The level a session on a model with `levels` would actually run at for
+ * `level`. Mirrors the kernel's `clampThinkingLevel`: `level` itself, else the
+ * nearest supported level above it, else the nearest below, else the lowest
+ * supported one. A draft that rounded differently would show one effort and
+ * start its session on another.
+ */
+export function clampEffort(level: string, levels: readonly string[]): string | undefined {
+	if (levels.includes(level)) return level;
+	const rank = EFFORT_ORDER.indexOf(level);
+	if (rank === -1) return levels[0];
+	const above = EFFORT_ORDER.slice(rank + 1).find((candidate) => levels.includes(candidate));
+	const below = EFFORT_ORDER.slice(0, rank)
+		.reverse()
+		.find((candidate) => levels.includes(candidate));
+	return above ?? below ?? levels[0];
+}
+
+/**
+ * What a draft's model panel shows: the host's prediction for a new session
+ * (`GET /api/v1/models`), with the model and effort picked in this draft laid
+ * over it. A picked model brings its own supported levels.
+ */
+export function draftModelSource(draft: DraftModels | null, pickedModel: string, pickedEffort: string): ModelSource {
+	if (!draft) return EMPTY_MODEL_SOURCE;
+	const picked = pickedModel ? draft.models.find((model) => modelKey(model) === pickedModel) : undefined;
+	if (!picked) {
+		const thinkingLevel = pickedEffort
+			? clampEffort(pickedEffort, draft.availableThinkingLevels)
+			: draft.thinkingLevel;
+		return { ...draft, thinkingLevel };
+	}
+	const levels = picked.thinkingLevels ?? [];
+	const wanted = pickedEffort || draft.thinkingLevel;
+	return {
+		models: draft.models,
+		model: { provider: picked.provider, id: picked.id },
+		availableThinkingLevels: levels,
+		thinkingLevel: wanted ? clampEffort(wanted, levels) : undefined,
+	};
+}
 
 /** Effort labels, keyed by the kernel's thinking level ids. */
 export const EFFORT_LABELS: Readonly<Record<string, string>> = {

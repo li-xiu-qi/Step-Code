@@ -379,6 +379,12 @@ const server = createServer(async (request, response) => {
 		if (parts[2] === "mcp" && parts.length === 3 && method === "GET") {
 			return json(response, 200, { servers: mcpStatuses() });
 		}
+		if (parts[2] === "models" && parts.length === 3 && method === "GET") {
+			// Unknown folders fall back to the launch folder: project settings are
+			// read from the cwd, so an arbitrary path must not pick which ones.
+			const cwd = (await knownWorkspace(url.searchParams.get("cwd"))) ?? defaultWorkspace();
+			return json(response, 200, await store.draftModels(cwd));
+		}
 		if (parts[2] === "sessions" && parts.length === 3 && method === "GET") {
 			const sessions = await store.list();
 			return json(response, 200, { sessions });
