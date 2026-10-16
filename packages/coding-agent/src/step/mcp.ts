@@ -403,6 +403,56 @@ export async function discoverStepMcpServers(cwd: string, projectTrusted: boolea
 	return result;
 }
 
+/** A plugin-declared MCP server as a settings screen lists it, disabled ones included. */
+export interface StepPluginMcpServerEntry {
+	/** Runtime name, `<pluginId>__<server>`; the key a `config.toml` override uses. */
+	readonly name: string;
+	readonly pluginId: string;
+	readonly pluginName: string;
+	readonly transport: "stdio" | "http";
+	/** False when the plugin declares it disabled or `config.toml` sets `enabled = false` for its runtime name. */
+	readonly enabled: boolean;
+}
+
+/**
+ * List every MCP server the installed plugins declare, including disabled ones,
+ * without connecting. Discovery (`discoverStepMcpServers`) drops disabled
+ * servers, so a host that offers an enable switch needs this view instead.
+ */
+export async function listStepPluginMcpServers(
+	cwd: string,
+	projectTrusted: boolean,
+): Promise<StepPluginMcpServerEntry[]> {
+	const roots = [defaultStepPluginsDir(process.env)];
+	if (projectTrusted) roots.push(defaultStepPluginsDir(process.env, { cwd, project: true }));
+	const overrides = readGlobalStepConfig(process.env).mcp_servers ?? {};
+	const result: StepPluginMcpServerEntry[] = [];
+	const seen = new Set<string>();
+	for (const root of roots) {
+		for (const pluginDir of await listStepPluginDirectories(root)) {
+			const parsed = await readStepPluginManifest(pluginDir);
+			if (!parsed.manifest) continue;
+			const declared = await resolveDeclaredServers(pluginDir, parsed.manifest.mcpServers);
+			if (!declared) continue;
+			for (const [serverName, value] of Object.entries(declared)) {
+				if (!isRecord(value) || !hasTransport(value)) continue;
+				const name = `${parsed.manifest.id}${PLUGIN_SERVER_SEPARATOR}${serverName}`;
+				if (seen.has(name)) continue;
+				seen.add(name);
+				const override = overrides[name];
+				result.push({
+					name,
+					pluginId: parsed.manifest.id,
+					pluginName: parsed.manifest.name ?? parsed.manifest.id,
+					transport: typeof value.command === "string" && value.command.trim() ? "stdio" : "http",
+					enabled: value.enabled !== false && !(isRecord(override) && override.enabled === false),
+				});
+			}
+		}
+	}
+	return result;
+}
+
 /**
  * Run a plugin's stdio server from the plugin root.
  *
