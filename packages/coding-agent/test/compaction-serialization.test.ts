@@ -18,10 +18,12 @@ describe("serializeConversation", () => {
 
 		const result = serializeConversation(messages);
 
-		expect(result).toContain("[Tool result]:");
+		expect(result).toContain('[Tool result call_id="tc1" name="read" isError=false]:');
 		expect(result).toContain("[... 3400 chars omitted (kept: 800-char head, 0 salient lines, 800-char tail) ...]");
 		// Head and tail are preserved verbatim (800 chars each); the middle is omitted.
-		expect(result.startsWith(`[Tool result]: ${"x".repeat(800)}\n[...`)).toBe(true);
+		expect(result.startsWith(`[Tool result call_id="tc1" name="read" isError=false]: ${"x".repeat(800)}\n[...`)).toBe(
+			true,
+		);
 		expect(result.endsWith("x".repeat(800))).toBe(true);
 		expect(result).not.toContain("x".repeat(801));
 	});
@@ -60,7 +62,9 @@ describe("serializeConversation", () => {
 			/\[\.\.\. \d+ chars omitted \(kept: 800-char head, 1 salient lines, 800-char tail\) \.\.\.\]/,
 		);
 		// The head is preserved verbatim.
-		expect(result.startsWith("[Tool result]: aaaaaaaaaaaaaaaaaaa\n")).toBe(true);
+		expect(result.startsWith('[Tool result call_id="tc1" name="bash" isError=true]: aaaaaaaaaaaaaaaaaaa\n')).toBe(
+			true,
+		);
 	});
 
 	it("re-surfaces python traceback and stack-frame lines from the omitted middle", () => {
@@ -115,7 +119,7 @@ describe("serializeConversation", () => {
 
 		const result = serializeConversation(messages);
 
-		expect(result).toBe(`[Tool result]: ${shortContent}`);
+		expect(result).toBe(`[Tool result call_id="tc1" name="read" isError=false]: ${shortContent}`);
 		expect(result).not.toContain("omitted");
 	});
 

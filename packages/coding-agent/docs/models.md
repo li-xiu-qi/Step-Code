@@ -203,8 +203,8 @@ If your command is slow, expensive, rate-limited, or should keep using a previou
 | `reasoning` | No | `false` | Supports extended thinking |
 | `thinkingLevelMap` | No | omitted | Maps step thinking levels to provider values and marks unsupported levels (see below) |
 | `input` | No | `["text"]` | Input types: `["text"]` or `["text", "image"]` |
-| `contextWindow` | No | `128000` | Context window size in tokens |
-| `maxTokens` | No | `16384` | Maximum output tokens |
+| `contextWindow` | No | Matching model limit, otherwise `128000` | Total context window size in tokens |
+| `maxTokens` | No | Matching model limit, otherwise `16384` | Maximum output tokens |
 | `samplingParams` | No | omitted | Sampling parameters merged verbatim into every request body (see below) |
 | `cost` | No | all zeros | Per-million-token rates with optional request-wide input pricing tiers |
 | `compat` | No | provider `compat` | Provider compatibility overrides. Merged with provider-level `compat` when both are set. |
@@ -332,8 +332,8 @@ To merge custom models into a built-in provider, include the `models` array:
 Merge semantics:
 - Built-in models are kept.
 - Custom models are upserted by `id` within the provider.
-- If a custom model `id` matches a built-in model `id`, the custom model replaces that built-in model.
-- If a custom model `id` is new, it is added alongside built-in models.
+- If a custom model `id` matches a built-in model `id`, the custom model replaces that built-in model. Omitted `contextWindow` and `maxTokens` retain that exact model's limits; transport-only overrides do not reset those budgets.
+- If a custom model `id` is new, it is added alongside built-in models. New IDs never borrow another model's capacity. Set their verified context and output limits explicitly when the generic defaults are unsuitable.
 
 ## Per-model Overrides
 

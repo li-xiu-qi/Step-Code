@@ -155,6 +155,9 @@ function modelFromJson(
 	if (definition.maxTokens !== undefined && definition.maxTokens <= 0) {
 		throw new Error(`Provider ${providerId}, model ${definition.id}: invalid maxTokens`);
 	}
+	// A model upsert may change only transport or one budget. Preserve limits
+	// from that exact model, never from the provider's unrelated first model.
+	const existingModel = defaults?.id === definition.id ? defaults : undefined;
 	return {
 		id: definition.id,
 		name: definition.name ?? definition.id,
@@ -165,8 +168,8 @@ function modelFromJson(
 		thinkingLevelMap: definition.thinkingLevelMap,
 		input: (definition.input ?? ["text"]) as ("text" | "image")[],
 		cost: definition.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: definition.contextWindow ?? 128000,
-		maxTokens: definition.maxTokens ?? 16384,
+		contextWindow: definition.contextWindow ?? existingModel?.contextWindow ?? 128000,
+		maxTokens: definition.maxTokens ?? existingModel?.maxTokens ?? 16384,
 		samplingParams: definition.samplingParams,
 		headers: undefined,
 		compat: mergeCompat(providerConfig.compat, definition.compat),

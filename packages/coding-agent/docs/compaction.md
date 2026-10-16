@@ -441,3 +441,19 @@ summary output beyond the limit. `keepRecentTokens` remains approximate; the
 ordinary model context/output declarations are unchanged. See the
 [compaction integrity contract](../../../docs/compaction-integrity.md) for exact
 request recognition and no-effort wire behavior.
+
+
+Summary input keeps each tool call ID and identifies every result by its call
+ID, tool name and error state. This includes results with no text. Long result
+bodies retain the existing truncation policy; their identity and error state
+remain outside the truncated body. Parallel results are matched by call ID,
+independently of their arrival order. Serialization does not modify native
+session history.
+
+In `clm-v1` mode, a failed default automatic summary records a fingerprint of
+the summarized prefix and its model/settings. Adding only retained tail messages
+does not start another retry budget for that same prefix. A changed prefix or
+model/retry configuration can try again. Explicit compaction, mandatory overflow
+recovery and `session_before_compact` extension decisions remain available.
+The failure fingerprint is local to the current session process and successful
+compaction clears it.
