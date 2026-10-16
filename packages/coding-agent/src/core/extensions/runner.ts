@@ -508,6 +508,15 @@ export class ExtensionRunner {
 		return this.extensions.map((e) => e.path);
 	}
 
+	/** Availability contributions are independent of tool registration ownership. */
+	getUnavailableToolNames(): ReadonlySet<string> {
+		const names = new Set<string>();
+		for (const extension of this.extensions) {
+			for (const name of extension.unavailableTools ?? []) names.add(name);
+		}
+		return names;
+	}
+
 	/** Get all registered tools from all extensions (first registration per name wins). */
 	getAllRegisteredTools(): RegisteredTool[] {
 		const toolsByName = new Map<string, RegisteredTool>();

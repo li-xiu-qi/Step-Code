@@ -450,7 +450,12 @@ export {
 	type ProjectTrustStoreEntry,
 	type ProjectTrustUpdate,
 } from "./core/trust-manager.ts";
-export { addUsageToTotals, createUsageTotals, getUsageCostBreakdown } from "./core/usage-totals.ts";
+export {
+	addUsageToTotals,
+	collectSessionUsage,
+	createUsageTotals,
+	getUsageCostBreakdown,
+} from "./core/usage-totals.ts";
 export {
 	createStepExtension,
 	createStepExtensionInline,
@@ -618,6 +623,7 @@ export { STEP_INIT_PROMPT } from "./step/init-prompt.ts";
 export { prepareStepInstallation } from "./step/installation.ts";
 export { maybeUpdateStep, runStepUpdateCommand } from "./step/local-update.ts";
 export {
+	checkStepPlanBeforeInteractive,
 	isStepInteractiveLoginStartup,
 	loginStepInBrowser,
 	loginStepWithApiKey,
@@ -808,6 +814,16 @@ export {
 export { buildStepThemeOptions, runStepThemePrompt, type StepThemeOption } from "./step/theme-prompt.ts";
 export { createStepToolProfile } from "./step/tool-profile.ts";
 export { resolveStepTraceHeaderBaseUrls } from "./step/trace-headers.ts";
+export { decodePlanUsage, PlanUsageController, resolvePlanUsageAccount } from "./step/usage/account.ts";
+export { overviewDates, scanUsageOverview } from "./step/usage/activity.ts";
+export type { StepUsageHost } from "./step/usage/commands.ts";
+export type {
+	AccountUsageState,
+	PlanUsageSnapshot,
+	UsageOverview,
+	UsagePresentation,
+	UsageStatus,
+} from "./step/usage/types.ts";
 export {
 	resolveStepCodeVersion,
 	STEPCODE_BUILD_VERSION_ENV,
