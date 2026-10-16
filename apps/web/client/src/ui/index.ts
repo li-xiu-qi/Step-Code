@@ -33,4 +33,5 @@ export {
 } from "./SegmentedControl/SegmentedControl";
 export { ShimmerText } from "./ShimmerText/ShimmerText";
 export { Spinner } from "./Spinner/Spinner";
+export { Switch, type SwitchProps } from "./Switch/Switch";
 export { Toast, type ToastProps, type ToastTone } from "./Toast/Toast";

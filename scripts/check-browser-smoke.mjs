@@ -82,10 +82,10 @@ function checkWebClientSurface() {
     ...[
       "workspaceButton",
       "workspaceBrowserModal",
-      "userPopover",
-      "themeMenuItem",
-      "languageMenuItem",
-      "logoutMenuItem",
+      "settingsButton",
+      "remoteControlButton",
+      "settingsView",
+      "logoutButton",
     ].filter((name) => !hasId(name)),
     ...["https://platform.stepfun.com/step-plan"].filter(
       (url) => !markup.includes(url),

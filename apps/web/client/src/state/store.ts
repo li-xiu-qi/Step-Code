@@ -114,6 +114,17 @@ export interface PreviewState {
 	readonly wrap: boolean;
 }
 
+/** Pages of the settings view, in menu order. */
+export type SettingsPage = "general" | "appearance" | "plugins" | "mcp" | "skills";
+
+/**
+ * What a settings editor edits. `mcp` with a name edits that server, without one
+ * creates a server; `json` opens it on the JSON tab (the "import" entry).
+ */
+export type SettingsEditor =
+	| { readonly kind: "mcp"; readonly name?: string; readonly json?: boolean }
+	| { readonly kind: "skill" };
+
 /**
  * Cross-feature UI flags. Legacy code toggled `hidden` / classes on fixed
  * elements from anywhere; here the owning feature renders from these flags and
@@ -137,10 +148,12 @@ export interface UiState {
 	/** `#workspaceBrowserModal` visible */
 	readonly workspaceBrowserOpen: boolean;
 	readonly workspaceRemoval: { readonly path: string; readonly pending: boolean } | null;
-	/** `#userPopover` visible */
-	readonly userMenuOpen: boolean;
-	/** Which settings submenu is unfolded (`#themeSubmenu` / `#languageSubmenu`). */
-	readonly preferenceSubmenu: "theme" | "language" | null;
+	/** `#settingsView`: the open settings page, or null while the workspace shows. */
+	readonly settingsPage: SettingsPage | null;
+	/** Full-width editor inside a settings page (new or edited MCP server, new skill). */
+	readonly settingsEditor: SettingsEditor | null;
+	/** Dialog above the settings view: add a marketplace, import a skill folder. */
+	readonly settingsDialog: "marketplace" | "skillImport" | null;
 	/** `#sessionMenu` (session context menu) at viewport coordinates. */
 	readonly sessionMenu: { readonly sessionId: string; readonly x: number; readonly y: number } | null;
 	/**
@@ -313,8 +326,9 @@ export function createInitialState(): AppState {
 			workspacePopoverOpen: false,
 			workspaceBrowserOpen: false,
 			workspaceRemoval: null,
-			userMenuOpen: false,
-			preferenceSubmenu: null,
+			settingsPage: null,
+			settingsEditor: null,
+			settingsDialog: null,
 			sessionMenu: null,
 			tagPicker: null,
 			authExpired: false,

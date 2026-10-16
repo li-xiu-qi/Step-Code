@@ -375,6 +375,10 @@ before(async () => {
       STEPCODE_WEB_PORT: String(port),
       STEPCODE_WEB_CWD: workspace,
       STEP_CODING_AGENT_DIR: agentDir,
+      // Plugins and marketplaces live under the storage root, which defaults to
+      // $HOME/.stepcode. Point it inside the fixture so the suite neither reads
+      // nor writes the developer's own plugins.
+      STEPCODE_STORAGE_ROOT_DIR: join(base, "stepcode"),
       // The credential path is its own setting, not derived from the agent
       // directory, so a fixture credential has to point the host at it.
       STEPCODE_AUTH_PATH: authPath,
@@ -474,7 +478,7 @@ test(
 )
 
 test(
-  "the settings popover reports the borrowed credential and applies appearance and language",
+  "the sidebar footer opens the settings view, which applies language and theme",
   { skip },
   async () => {
     const report = await browser.run(`
@@ -496,63 +500,163 @@ test(
       "no secret in the report",
     )
 
-    const shown = await browser.run(`
-		$("#userMenuButton").click();
-		await until(() => !$("#userPopover").hidden, "settings popover");
+    // The footer holds the account, the remote-control placeholder and the gear.
+    const footer = await browser.run(`
+		$("#settingsButton").click();
+		await until(() => !$("#settingsView").hidden, "settings view");
 		return {
-			label: $("#userMenuButton").textContent.trim(),
-			// The account block, the redundant settings row and the login note
-			// (removed in cdf3bb3) are gone; the credential report is API-only.
-			login: !!$("#loginNote") || !!$("#loginCommand"),
-			account: !!$(".user-popover-account"),
-			gear: !!$("#userMenuButton use[href='#i-settings']"),
+			gear: !!$("#settingsButton use[href='#i-cog']"),
+			phone: !!$("#remoteControlButton use[href='#i-phone']"),
+			remoteDisabled: $("#remoteControlButton").getAttribute("aria-disabled"),
+			popover: !!$("#userPopover"),
+			page: $("#settingsView [data-page]").dataset.page,
+			account: $("#settingsAccountLabel").textContent,
+			legacy: !!$("#loginNote") || !!$("#loginCommand") || !!$(".user-popover-account"),
 		};
 	`)
-    assert.equal(shown.label, "设置")
-    assert.equal(shown.gear, true)
-    assert.equal(shown.account, false)
-    assert.equal(shown.login, false)
+    assert.equal(footer.gear, true)
+    assert.equal(footer.phone, true)
+    assert.equal(footer.remoteDisabled, "true")
+    assert.equal(footer.popover, false, "the popover is gone")
+    assert.equal(footer.page, "general")
+    assert.equal(footer.account, "Step Plan · 中国大陆")
+    assert.equal(footer.legacy, false)
 
-    // The rows open their submenu on the first click: they must not bubble into
-    // the document handler that closes the popover on an outside click.
-    const appearance = await browser.run(`
-		$("#themeMenuItem").click();
-		await until(() => !$("#themeSubmenu").hidden, "appearance submenu");
-		$("[data-theme-choice='dark']").click();
-		await until(() => document.documentElement.dataset.theme === "dark", "dark theme");
-		return { stored: localStorage.getItem("stepcode.theme"), value: $("#themeValue").textContent };
-	`)
-    assert.equal(appearance.stored, "dark")
-    assert.equal(appearance.value, "深色")
-
+    // Language applies from the general page and is remembered.
     const language = await browser.run(`
-		$("#languageMenuItem").click();
-		await until(() => !$("#languageSubmenu").hidden, "language submenu");
-		const openedOnFirstClick = $("#userPopover").hidden === false;
 		$("[data-language-choice='en-US']").click();
 		await until(() => document.documentElement.lang === "en-US", "English");
+		return { stored: localStorage.getItem("stepcode.locale"), nav: $("#settingsBack").textContent.trim() };
+	`)
+    assert.equal(language.stored, "en-US")
+    assert.equal(language.nav, "Back to workspace")
+
+    // Theme applies from the appearance page.
+    const appearance = await browser.run(`
+		$("[data-settings-page='appearance']").click();
+		await until(() => $("#settingsView [data-page]").dataset.page === "appearance", "appearance page");
+		$("[data-theme-choice='dark']").click();
+		await until(() => document.documentElement.dataset.theme === "dark", "dark theme");
 		return {
-			openedOnFirstClick,
-			stored: localStorage.getItem("stepcode.locale"),
-			label: $("#userMenuButton").textContent.trim(),
-			appearance: $("#themeMenuItem span").textContent,
+			stored: localStorage.getItem("stepcode.theme"),
+			checked: $("[data-theme-choice='dark']").getAttribute("aria-pressed"),
 		};
 	`)
-    assert.equal(language.openedOnFirstClick, true)
-    assert.equal(language.stored, "en-US")
-    assert.equal(language.label, "Settings")
-    assert.equal(language.appearance, "Appearance")
+    assert.equal(appearance.stored, "dark")
+    assert.equal(appearance.checked, "true")
+
+    // Escape leaves the settings view; the workspace is interactive again.
+    const closed = await browser.run(`
+		document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+		await until(() => $("#settingsView").hidden, "settings view to close");
+		const hidden = $("#settingsView").hidden;
+		$("#settingsButton").click();
+		await until(() => !$("#settingsView").hidden, "settings view to reopen");
+		return { hidden, page: $("#settingsView [data-page]").dataset.page };
+	`)
+    assert.equal(closed.hidden, true)
+    assert.equal(closed.page, "general", "reopening starts on the first page")
 
     // Leave the suite in the state it found, since the browser is shared.
     const restored = await browser.run(`
-		$("[data-language-choice='zh-CN']").click();
-		$("#themeMenuItem").click();
+		$("[data-settings-page='appearance']").click();
+		await until(() => $("#settingsView [data-page]").dataset.page === "appearance", "appearance page");
 		$("[data-theme-choice='system']").click();
-		$("#userMenuButton").click();
-		await until(() => $("#userPopover").hidden, "settings popover to close");
+		$("[data-settings-page='general']").click();
+		await until(() => $("#settingsView [data-page]").dataset.page === "general", "general page");
+		$("[data-language-choice='zh-CN']").click();
+		await until(() => document.documentElement.lang === "zh-CN", "Chinese");
+		$("#settingsBack").click();
+		await until(() => $("#settingsView").hidden, "settings view to close");
 		return localStorage.getItem("stepcode.theme");
 	`)
     assert.equal(restored, "system")
+  },
+)
+
+test(
+  "the settings pages manage MCP servers, plugins and skills through the host",
+  { skip },
+  async () => {
+    const created = await browser.run(`
+		const post = (path, body) => fetch(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+		const bad = await post("/api/v1/settings/mcp", { name: "bad__name", config: { command: "node" } });
+		const added = await post("/api/v1/settings/mcp", { name: "e2e-files", config: { command: "node", args: ["server.js"] } });
+		const list = await (await fetch("/api/v1/settings/mcp")).json();
+		return {
+			bad: bad.status,
+			added: added.status,
+			server: list.servers.find((server) => server.name === "e2e-files"),
+		};
+	`)
+    assert.equal(created.bad, 400, "'__' is reserved for plugin servers")
+    assert.equal(created.added, 201)
+    assert.equal(created.server.source, "user")
+    assert.equal(created.server.transport, "stdio")
+    assert.equal(created.server.enabled, true)
+
+    // The MCP page lists it, the switch writes config.toml, and delete removes it.
+    const managed = await browser.run(`
+		$("#settingsButton").click();
+		await until(() => !$("#settingsView").hidden, "settings view");
+		$("[data-settings-page='mcp']").click();
+		await until(() => $("[data-mcp-server='e2e-files']"), "the server row");
+		$("[data-mcp-server='e2e-files'] [role='switch']").click();
+		await until(async () => (await (await fetch("/api/v1/settings/mcp")).json()).servers.find((s) => s.name === "e2e-files")?.enabled === false, "the server switched off");
+		const config = await (await fetch("/api/v1/settings/mcp")).json();
+		window.confirm = () => true;
+		$("[data-mcp-server='e2e-files'] button[aria-label='删除']").click();
+		await until(() => !$("[data-mcp-server='e2e-files']"), "the server row to go");
+		const after = await (await fetch("/api/v1/settings/mcp")).json();
+		return {
+			off: config.servers.find((s) => s.name === "e2e-files").enabled,
+			gone: !after.servers.some((server) => server.name === "e2e-files"),
+		};
+	`)
+    assert.equal(managed.off, false)
+    assert.equal(managed.gone, true)
+
+    // Creating a skill writes SKILL.md, the switch writes the skills pattern, delete removes the folder.
+    const skills = await browser.run(`
+		const post = (body) => fetch("/api/v1/settings/skills", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+		const created = await post({ name: "e2e-notes", description: "Write release notes", instructions: "Steps." });
+		$("[data-settings-page='skills']").click();
+		await until(() => $("[data-skill='e2e-notes']"), "the skill row");
+		const listed = await (await fetch("/api/v1/settings/skills")).json();
+		const skill = listed.skills.find((entry) => entry.name === "e2e-notes");
+		$("[data-skill='e2e-notes'] [role='switch']").click();
+		await until(async () => (await (await fetch("/api/v1/settings/skills")).json()).skills.find((s) => s.name === "e2e-notes")?.enabled === false, "the skill switched off");
+		window.confirm = () => true;
+		$("[data-skill='e2e-notes'] button[aria-label='删除']").click();
+		await until(() => !$("[data-skill='e2e-notes']"), "the skill row to go");
+		return { created: created.status, deletable: skill.deletable, location: skill.location };
+	`)
+    assert.equal(skills.created, 201)
+    assert.equal(skills.deletable, true)
+    // `~` when the host can shorten it, an absolute path otherwise.
+    assert.ok(
+      skills.location.startsWith("~/") || skills.location.includes("/skills/e2e-notes/SKILL.md"),
+      `unexpected skill location: ${skills.location}`,
+    )
+
+    // The plugin page lists the built-in marketplace and says so when nothing is installed.
+    const plugins = await browser.run(`
+		$("[data-settings-page='plugins']").click();
+		await until(() => $("[data-settings-page='plugins']").getAttribute("aria-current") === "page", "plugins page");
+		// The sources tab lists the marketplaces the host resolved.
+		const tab = $$("#settingsView .settings-tabs button").find((button) => button.textContent.includes("市场来源"));
+		tab.click();
+		await until(() => $("[data-marketplace='builtin']"), "the built-in marketplace row");
+		const catalog = await (await fetch("/api/v1/settings/plugins")).json();
+		return {
+			marketplaces: catalog.marketplaces.map((entry) => entry.name),
+			installed: catalog.installed.length,
+			builtinKind: $("[data-marketplace='builtin']").textContent.includes("内置"),
+		};
+	`)
+    assert.ok(plugins.marketplaces.includes("builtin"), "the built-in marketplace is listed")
+    assert.equal(plugins.installed, 0)
+    assert.equal(plugins.builtinKind, true)
   },
 )
 

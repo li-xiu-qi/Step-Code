@@ -12,9 +12,6 @@ import { getState, setState, setUi, type ThemeChoice } from "../../state/store";
 
 const THEMES: readonly ThemeChoice[] = ["system", "light", "dark"];
 
-/** Settings submenus that unfold inside `#userPopover`. */
-export type PreferenceSubmenu = "theme" | "language";
-
 function systemPrefersDark(): boolean {
 	return typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
 }
@@ -27,7 +24,7 @@ export function resolvedTheme(theme: ThemeChoice = getState().theme): "light" | 
 /**
  * Apply and (by default) persist a theme choice (legacy `applyTheme`, 559-564).
  * Writes `<html data-theme>` directly so the first paint is already themed.
- * `renderPreferenceControls` is gone: `UserArea` re-renders from the store.
+ * Settings controls re-render from the store.
  */
 export function applyTheme(theme: string, persist = true): void {
 	const next: ThemeChoice = THEMES.includes(theme as ThemeChoice) ? (theme as ThemeChoice) : "system";
@@ -47,30 +44,6 @@ export function applyLocale(locale: string, persist = true): void {
 	if (persist) writeStorage(STORAGE_KEYS.locale, next);
 }
 
-/**
- * Open, close (`force`) or toggle the settings popover (legacy `toggleUserMenu`,
- * 3195-3201). Closing it also folds the theme/language submenus.
- */
-export function toggleUserMenu(force?: boolean): void {
-	setUi((ui) => {
-		const open = force ?? !ui.userMenuOpen;
-		return open ? { userMenuOpen: true } : { userMenuOpen: false, preferenceSubmenu: null };
-	});
-}
-
-/** Fold both settings submenus (legacy `closePreferenceSubmenus`, 3203-3208). */
-export function closePreferenceSubmenus(): void {
-	setUi({ preferenceSubmenu: null });
-}
-
-/**
- * Unfold one settings submenu and fold the other, or fold it when it is
- * already open (legacy `togglePreferenceSubmenu`, 3210-3222).
- */
-export function togglePreferenceSubmenu(kind: PreferenceSubmenu): void {
-	setUi((ui) => ({ preferenceSubmenu: ui.preferenceSubmenu === kind ? null : kind }));
-}
-
 /** Show or hide the sidebar (legacy `.app.classList.toggle("sidebar-hidden")`, 3383-3388, 3627). */
 export function toggleSidebar(): void {
 	setUi((ui) => ({ sidebarHidden: !ui.sidebarHidden }));
@@ -85,8 +58,7 @@ export async function logout(): Promise<void> {
 	try {
 		await api("/auth/logout", { method: "POST", body: "{}" });
 		closeStream();
-		toggleUserMenu(false);
-		setUi({ loggedOut: true });
+		setUi({ loggedOut: true, settingsPage: null, settingsEditor: null, settingsDialog: null });
 	} catch (error) {
 		showError(errorMessage(error));
 	}
