@@ -99,8 +99,8 @@ describe("AgentSession model and extension characterization", () => {
 		expect(harness.session.model?.id).toBe("faux-2");
 		expect(harness.settingsManager.getDefaultModel()).toBe("faux-1");
 
-		harness.session.setThinkingLevel("off");
-		expect(harness.session.cycleThinkingLevel()).toBe("minimal");
+		harness.session.setThinkingLevel("low");
+		expect(harness.session.cycleThinkingLevel()).toBe("medium");
 		expect(harness.settingsManager.getDefaultThinkingLevel()).toBe("low");
 	});
 
@@ -154,7 +154,7 @@ describe("AgentSession model and extension characterization", () => {
 			],
 			settings: {
 				defaultThinkingLevel: "high",
-				modelThinkingLevels: { "faux/faux-2": "minimal" },
+				modelThinkingLevels: { "faux/faux-2": "low" },
 			},
 		});
 		harnesses.push(harness);
@@ -162,7 +162,22 @@ describe("AgentSession model and extension characterization", () => {
 		// Start on a non-thinking model, then switch to faux-2
 		const model2 = harness.getModel("faux-2")!;
 		await harness.session.setModel(model2);
-		expect(harness.session.thinkingLevel).toBe("minimal");
+		expect(harness.session.thinkingLevel).toBe("low");
+	});
+
+	it("does not offer minimal unless the model maps it, and clamps a saved minimal up", async () => {
+		const harness = await createHarness({
+			models: [{ id: "faux-1", reasoning: true }],
+			settings: { defaultThinkingLevel: "minimal" },
+		});
+		harnesses.push(harness);
+
+		expect(harness.session.getAvailableThinkingLevels()).toEqual(["off", "low", "medium", "high"]);
+		harness.session.setThinkingLevel("minimal");
+		expect(harness.session.thinkingLevel).toBe("low");
+
+		harness.getModel().thinkingLevelMap = { minimal: "minimal" };
+		expect(harness.session.getAvailableThinkingLevels()).toContain("minimal");
 	});
 
 	it("cycles through scoped models and preserves the scoped thinking preference", async () => {
@@ -204,15 +219,7 @@ describe("AgentSession model and extension characterization", () => {
 		harnesses.push(harness);
 		harness.getModel().thinkingLevelMap = { xhigh: "xhigh", max: "max" };
 
-		expect(harness.session.getAvailableThinkingLevels()).toEqual([
-			"off",
-			"minimal",
-			"low",
-			"medium",
-			"high",
-			"xhigh",
-			"max",
-		]);
+		expect(harness.session.getAvailableThinkingLevels()).toEqual(["off", "low", "medium", "high", "xhigh", "max"]);
 		harness.session.setThinkingLevel("high");
 		expect(harness.session.cycleThinkingLevel()).toBe("xhigh");
 		expect(harness.session.cycleThinkingLevel()).toBe("max");

@@ -899,13 +899,21 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 
 const EXTENDED_THINKING_LEVELS: ModelThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
+/**
+ * Levels a reasoning model only offers when its `thinkingLevelMap` maps them.
+ * `minimal` is opt-in like the extended levels: few endpoints accept it, and an
+ * unmapped level is sent verbatim, so offering it by default lets a user pick a
+ * value the provider may reject.
+ */
+const OPT_IN_THINKING_LEVELS: ReadonlySet<ModelThinkingLevel> = new Set(["minimal", "xhigh", "max"]);
+
 export function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): ModelThinkingLevel[] {
 	if (!model.reasoning) return ["off"];
 
 	return EXTENDED_THINKING_LEVELS.filter((level) => {
 		const mapped = model.thinkingLevelMap?.[level];
 		if (mapped === null) return false;
-		if (level === "xhigh" || level === "max") return mapped !== undefined;
+		if (OPT_IN_THINKING_LEVELS.has(level)) return mapped !== undefined;
 		return true;
 	});
 }

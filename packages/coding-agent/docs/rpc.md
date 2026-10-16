@@ -351,7 +351,7 @@ Response:
   "command": "get_available_thinking_levels",
   "success": true,
   "data": {
-    "levels": ["off", "minimal", "low", "medium", "high"]
+    "levels": ["off", "low", "medium", "high"]
   }
 }
 ```

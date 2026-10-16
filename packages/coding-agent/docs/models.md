@@ -263,7 +263,7 @@ Values are tristate:
 
 | Value | Meaning |
 |-------|---------|
-| omitted | Standard levels through `high` use the provider's default mapping; extended `xhigh` and `max` levels are unsupported |
+| omitted | `off`, `low`, `medium`, and `high` use the provider's default mapping; `minimal`, `xhigh`, and `max` are opt-in and unsupported |
 | string | Level is supported and this value is sent to the provider |
 | `null` | Level is unsupported and hidden/skipped/clamped away |
 
