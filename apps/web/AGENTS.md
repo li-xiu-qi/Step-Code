@@ -152,10 +152,11 @@ Run from the repo root.
 | Command | Use |
 |---|---|
 | `pnpm web` | Build the client, run the host from source with the current folder as workspace (port 3077) |
+| `pnpm web:watch` | Same as `pnpm web`, but rebuilds the client and restarts the host on every source change (web or imported packages); refresh the page to see it. A host restart drops running turns |
 | `pnpm --filter @step-harness/web dev:client` | Vite dev server with HMR, proxies to a host on `STEPCODE_WEB_PORT` (start the host first) |
 | `pnpm --filter @step-harness/web typecheck` | Host and client type check |
 | `pnpm --filter @step-harness/web test` | Host unit tests |
-| `node --import tsx --test test/<name>.test.ts` | One unit test file (from `apps/web/`) |
+| `TSX_TSCONFIG_PATH=../../tsconfig.json node --import tsx --test test/<name>.test.ts` | One unit test file (from `apps/web/`); without the tsconfig, workspace packages resolve to `dist/` and fail |
 | `pnpm --filter @step-harness/web test:e2e` | Client build + e2e in headless Chrome (`CHROME_PATH` to override; skipped without Chrome) |
 | `pnpm run check` | Required before handing back any code change: Biome, guards, type checks, web unit tests, web runtime, browser smoke, desktop type check |
 
