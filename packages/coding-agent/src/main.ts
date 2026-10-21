@@ -721,6 +721,11 @@ async function promptForMissingSessionCwd(
 
 export interface MainOptions {
 	extensionFactories?: InlineExtension[];
+	/**
+	 * Working directory override. When set, the session, settings discovery,
+	 * and resource loading all key off this path instead of process.cwd().
+	 */
+	cwd?: string;
 	/** Global agent directory for this product instance. */
 	agentDir?: string;
 	/** Project resource directory name for this product instance. */
@@ -863,7 +868,7 @@ export type MainPreparation =
 export async function prepareMain(args: string[], options?: MainOptions): Promise<MainPreparation> {
 	const extensionFactories = [...builtInExtensions, ...(options?.extensionFactories ?? [])];
 	const configDirName = options?.configDirName?.trim() || CONFIG_DIR_NAME;
-	const cwd = process.cwd();
+	const cwd = resolvePath(options?.cwd ?? process.cwd());
 	const agentDir = options?.agentDir ? resolvePath(options.agentDir) : getAgentDir();
 	// A computed default agent directory is also used by ordinary Pi. Only an
 	// explicitly supplied product path opts into the Step storage facade; this

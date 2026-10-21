@@ -198,6 +198,7 @@ const stepMainOptions: MainOptions = {
 	agentDir: resolveStepAgentDir(),
 	modelsPath: join(resolveStepConfigRoot(), "models.json"),
 	configDirName: resolveStepConfigDir(),
+	cwd: stepPermissionArgs.cwd,
 	sessionManagerFactory: createStepSessionManagerFactory(resolveStepAgentDir()),
 	settingsManagerFactory: (cwd, agentDir, options) => {
 		const stepManager = createStepSettingsManager(cwd, agentDir, options);
