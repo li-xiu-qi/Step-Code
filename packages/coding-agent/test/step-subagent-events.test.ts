@@ -2,16 +2,20 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os, { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentToolResult } from "@step-harness/agent-core";
+import type { Usage } from "@step-harness/providers/compat";
 import { expect, test, vi } from "vitest";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "../src/core/extensions/types.ts";
 import {
 	createStepSubagentExtension,
 	escapeXmlAttr,
+	makeToolResult,
 	routeSubagentRpcLine,
+	type StepSubagentDetails,
 	type StepSubagentRunInput,
 	type StepSubagentRunResult,
 } from "../src/features/step-subagent.ts";
 import { builtinStepAgents, resolveStepAgent, type StepAgentConfig } from "../src/features/step-subagent-agents.ts";
+import { createLaneLifecycle } from "../src/features/subagent/lane-lifecycle.ts";
 
 interface SentMessage {
 	customType: string;
@@ -81,10 +85,12 @@ function createApi(): {
 	api: ExtensionAPI;
 	tools: Map<string, ToolDefinition>;
 	sent: SentMessage[];
+	entries: Array<{ customType: string; data?: unknown }>;
 	handlers: Map<string, Handler[]>;
 } {
 	const tools = new Map<string, ToolDefinition>();
 	const sent: SentMessage[] = [];
+	const entries: Array<{ customType: string; data?: unknown }> = [];
 	const handlers = new Map<string, Handler[]>();
 	const api = {
 		registerTool(tool: ToolDefinition) {
@@ -100,13 +106,52 @@ function createApi(): {
 		getActiveTools: () => [],
 		setActiveTools: () => {},
 		getFlag: () => false,
-		appendEntry: () => {},
+		appendEntry: (customType: string, data?: unknown) => {
+			entries.push({ customType, data });
+		},
 		sendMessage: (message: SentMessage, options?: { deliverAs?: string; triggerTurn?: boolean }) => {
 			sent.push({ ...message, deliverAs: options?.deliverAs, triggerTurn: options?.triggerTurn });
 		},
 		sendUserMessage: () => {},
 	} as unknown as ExtensionAPI;
-	return { api, tools, sent, handlers };
+	return { api, tools, sent, entries, handlers };
+}
+
+function usageRecords(entries: Array<{ customType: string; data?: unknown }>): Array<{
+	turn: number;
+	childSessionIds: string[];
+	usage: Usage;
+}> {
+	return entries
+		.filter((entry) => entry.customType === "step-subagent-usage")
+		.map((entry) => entry.data as { turn: number; childSessionIds: string[]; usage: Usage });
+}
+
+function preparedTurn(task: string) {
+	return {
+		mode: "single",
+		scope: "user",
+		discovery: { agents: builtinStepAgents, userAgentsDir: "/agents", projectAgentsDir: null },
+		tasks: [{ agent: "general", task }],
+	} as never;
+}
+
+function completedTurnDetails(task: string): StepSubagentDetails {
+	return {
+		mode: "single",
+		agentScope: "user",
+		userAgentsDir: "/agents",
+		projectAgentsDir: null,
+		results: [
+			{
+				...textResult(task),
+				agent: "general",
+				agentSource: "builtin",
+				task,
+				status: "completed",
+			},
+		],
+	};
 }
 
 function laneIdOf(result: AgentToolResult<unknown>): string {
@@ -250,6 +295,34 @@ test("accepts the descriptive general-purpose name as an alias for the built-in 
 
 	expect(agents).toEqual(["general"]);
 	expect(result.content[0]).toMatchObject({ type: "text", text: expect.stringContaining("alias output") });
+});
+
+test("a runner failure preserves the last reported usage", async () => {
+	const { api, tools } = createApi();
+	createStepSubagentExtension({
+		includeBuiltinAgents: true,
+		agentDir: "/tmp/step-agent-test",
+		runner: async (input) => {
+			input.onUpdate?.({
+				...textResult("partial"),
+				usage: { input: 7, output: 1, cacheRead: 2, cacheWrite: 0, cost: 0.1, contextTokens: 10, turns: 1 },
+			});
+			throw new Error("runner failed after usage");
+		},
+	})(api);
+	const result = await tools
+		.get("subagent")!
+		.execute(
+			"call",
+			{ agent: "general", task: "inspect" } as never,
+			undefined,
+			undefined,
+			createContext("/workspace"),
+		);
+
+	expect(result.isError).toBe(true);
+	expect(result.usage).toMatchObject({ input: 7, output: 1, cacheRead: 2, totalTokens: 10 });
+	expect(result.usage?.cost.total).toBeCloseTo(0.1);
 });
 
 test("a ten-task batch starts eight and queues two on a ten-core host", async () => {
@@ -710,6 +783,173 @@ test("a single-lane reply runs only the follow-up task for the lane's agent", as
 	]);
 });
 
+test("queued background turns each persist usage once", async () => {
+	const { api, tools, entries } = createApi();
+	const gate = deferred();
+	createStepSubagentExtension({
+		agentDir: "/tmp/step-agent-test",
+		runner: async (input) => {
+			if (input.task === "first") {
+				input.onUpdate?.({
+					...textResult(""),
+					exitCode: -1,
+					usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+				});
+				await gate.promise;
+				return {
+					...textResult("first"),
+					usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+				};
+			}
+			return {
+				...textResult("second"),
+				usage: { input: 11, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0.2, contextTokens: 13, turns: 1 },
+			};
+		},
+	})(api);
+	const lane = laneIdOf(await startLane(tools, { agent: "general", task: "first" }));
+	await agentSend(tools, { lane_id: lane, action: "reply", prompt: "second" });
+	gate.resolve();
+	await waitFor(() => usageRecords(entries).length === 2);
+	const records = usageRecords(entries);
+	expect(records.map((record) => record.turn)).toEqual([1, 2]);
+	expect(records.map((record) => record.usage.input)).toEqual([7, 11]);
+	expect(records.map((record) => record.usage.cost.total)).toEqual([0.1, 0.2]);
+});
+
+test("interrupting a background turn records both the interrupted and replacement turns", async () => {
+	const { api, tools, entries } = createApi();
+	createStepSubagentExtension({
+		agentDir: "/tmp/step-agent-test",
+		runner: async (input) => {
+			if (input.task === "first") {
+				input.onUpdate?.({
+					...textResult(""),
+					exitCode: -1,
+					usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+				});
+				await new Promise<void>((resolve) =>
+					input.signal?.addEventListener("abort", () => resolve(), { once: true }),
+				);
+				return {
+					...textResult("interrupted"),
+					stopReason: "aborted",
+					usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+				};
+			}
+			return {
+				...textResult("replacement"),
+				usage: { input: 11, output: 2, cacheRead: 0, cacheWrite: 0, cost: 0.2, contextTokens: 13, turns: 1 },
+			};
+		},
+	})(api);
+	const lane = laneIdOf(await startLane(tools, { agent: "general", task: "first" }));
+	await agentSend(tools, { lane_id: lane, action: "reply", prompt: "second", interrupt: true });
+	await waitFor(() => usageRecords(entries).length === 2);
+	expect(usageRecords(entries).map((record) => record.turn)).toEqual([1, 2]);
+	expect(usageRecords(entries).map((record) => record.usage.input)).toEqual([7, 11]);
+});
+
+test("session shutdown persists the latest observed usage without sending a notification", async () => {
+	const { api, tools, entries, sent, handlers } = createApi();
+	let started = false;
+	createStepSubagentExtension({
+		agentDir: "/tmp/step-agent-test",
+		runner: async (input) => {
+			input.onUpdate?.({
+				...textResult(""),
+				exitCode: -1,
+				usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+			});
+			started = true;
+			await new Promise<void>((resolve) => input.signal?.addEventListener("abort", () => resolve(), { once: true }));
+			return {
+				...textResult("aborted"),
+				stopReason: "aborted",
+				usage: { input: 7, output: 1, cacheRead: 0, cacheWrite: 0, cost: 0.1, contextTokens: 8, turns: 1 },
+			};
+		},
+	})(api);
+	await startLane(tools, { agent: "general", task: "shutdown" });
+	await waitFor(() => started);
+	await handlers.get("session_shutdown")![0]!(
+		{ type: "session_shutdown", reason: "new" },
+		createContext("/workspace"),
+	);
+	const records = usageRecords(entries);
+	expect(records).toHaveLength(1);
+	expect(records[0]?.usage).toMatchObject({ input: 7, output: 1, totalTokens: 8 });
+	expect(records[0]?.childSessionIds).toHaveLength(1);
+	expect(sent).toHaveLength(0);
+});
+
+test("a later preflight failure does not record the previous turn's usage", async () => {
+	const { api, entries, sent } = createApi();
+	let second = false;
+	const lifecycle = createLaneLifecycle({
+		pi: api,
+		lanes: new Map(),
+		prepare: async () => {
+			if (second) throw new Error("second preflight failed");
+			return { ok: true, run: preparedTurn("first") };
+		},
+		run: async () => makeToolResult(completedTurnDetails("first"), "done"),
+		outputDirectory: () => "/tmp",
+		updateLaneWidget: () => {},
+		clearLaneWidget: () => {},
+	});
+	const lane = lifecycle.launchLane(
+		{ agent: "general", task: "first" },
+		createContext("/workspace"),
+		preparedTurn("first"),
+		1000,
+	);
+	if (typeof lane === "string") throw new Error(lane);
+	await waitFor(() => usageRecords(entries).length === 1);
+	second = true;
+	lifecycle.replyToLane(lane, "second", false);
+	await waitFor(() => sent.some((message) => message.details?.event === "background_failed"));
+	expect(usageRecords(entries)).toHaveLength(1);
+});
+
+test("a rejected later turn does not reuse the previous turn's usage when stopped", async () => {
+	const { api, entries } = createApi();
+	let second = false,
+		secondStarted = false,
+		rejectSecond!: (error: Error) => void;
+	const lifecycle = createLaneLifecycle({
+		pi: api,
+		lanes: new Map(),
+		prepare: async () => ({ ok: true, run: preparedTurn(second ? "second" : "first") }),
+		run: async () => {
+			if (!second) return makeToolResult(completedTurnDetails("first"), "done");
+			secondStarted = true;
+			return new Promise<never>((_resolve, reject) => {
+				rejectSecond = reject;
+			});
+		},
+		outputDirectory: () => "/tmp",
+		updateLaneWidget: () => {},
+		clearLaneWidget: () => {},
+	});
+	const lane = lifecycle.launchLane(
+		{ agent: "general", task: "first" },
+		createContext("/workspace"),
+		preparedTurn("first"),
+		1000,
+	);
+	if (typeof lane === "string") throw new Error(lane);
+	await waitFor(() => usageRecords(entries).length === 1);
+	second = true;
+	const reply = lifecycle.replyToLane(lane, "second", false);
+	expect(reply).toContain("Started follow-up");
+	await waitFor(() => secondStarted);
+	lifecycle.stopLane(lane);
+	rejectSecond(new Error("second rejected"));
+	await new Promise((resolve) => setTimeout(resolve, 50));
+	expect(usageRecords(entries)).toHaveLength(1);
+});
+
 test("preflight failures return an ordinary error and create no lane", async () => {
 	const { api, tools, sent } = createApi();
 	let runs = 0;
@@ -964,7 +1204,7 @@ test("session shutdown stops this session's lanes silently and leaves another se
 });
 
 test("stop sends a single interrupted notification carrying the partial run", async () => {
-	const { api, tools, sent } = createApi();
+	const { api, tools, entries, sent } = createApi();
 	createStepSubagentExtension({
 		agentDir: "/tmp/step-agent-test",
 		runner: async (input) => {
@@ -980,6 +1220,8 @@ test("stop sends a single interrupted notification carrying the partial run", as
 	expect(sent).toHaveLength(1);
 	expect(sent[0]!.details?.event).toBe("background_interrupted");
 	expect(sent[0]!.content).toContain(`Lane ${lane} was stopped: 1 stopped.`);
+	expect(usageRecords(entries)).toHaveLength(1);
+	expect(usageRecords(entries)[0]?.usage).toMatchObject({ input: 1, output: 2, totalTokens: 3 });
 });
 
 test("idle keep-alive children are stopped after the TTL and a reply resumes quietly", async () => {

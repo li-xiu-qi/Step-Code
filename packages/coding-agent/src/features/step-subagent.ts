@@ -17,6 +17,7 @@ import { CONFIG_DIR_NAME } from "../config.ts";
 import { CHILD_SESSION_ORIGIN } from "../core/child-session.ts";
 import type { ExtensionAPI, ExtensionContext, ExtensionFactory, InlineExtension } from "../core/extensions/types.ts";
 import type { NewSessionOptions } from "../core/session-manager.ts";
+import { delegatedUsageToUsage, sumDelegatedUsage } from "../core/usage-totals.ts";
 import { resolveStepAgentDir, resolveStepConfigDir } from "../step/environment.ts";
 import {
 	isValidSubagentBackgroundTimeout,
@@ -548,6 +549,7 @@ export function makeToolResult(
 	return {
 		content: [{ type: "text", text }],
 		details,
+		...(details.results.length > 0 ? { usage: delegatedUsageToUsage(sumDelegatedUsage(details.results)) } : {}),
 		...(isError || details.results.some((record) => record.status === "failed" || record.status === "aborted")
 			? { isError: true }
 			: {}),
@@ -872,8 +874,7 @@ export function createStepSubagentExtension(options: StepSubagentExtensionOption
 					);
 				}
 				const details: StepSubagentDetails = { ...lane.details, results: [...lane.details.results] };
-				return makeToolResult(
-					details,
+				return controlResult(
 					[
 						`Started background lane ${lane.id} (${preflight.run.mode}, ${preflight.run.tasks.length} task${preflight.run.tasks.length === 1 ? "" : "s"}; ${Math.round(lane.turnTimeoutMs / 1000)}s limit per turn).`,
 						// Without this the parent, told to "wait for the lane", has no wait
@@ -886,6 +887,7 @@ export function createStepSubagentExtension(options: StepSubagentExtensionOption
 					]
 						.filter(Boolean)
 						.join(" "),
+					details,
 				);
 			},
 			renderCall: (params, theme) => {
