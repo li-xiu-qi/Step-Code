@@ -2,7 +2,7 @@ import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:f
 
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 
 import { StreamableHTTPError } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -372,10 +372,10 @@ test("a plugin stdio server runs from the plugin root unless it names an absolut
 	});
 	const discovered = await discoverStepMcpServers(process.cwd(), false);
 	const cwdOf = (server: string) => discovered.find((entry) => entry.name === `local__${server}`)?.declaration.cwd;
-	expect(cwdOf("bare")).toBe(dir);
-	expect(cwdOf("dot")).toBe(dir);
-	expect(cwdOf("nested")).toBe(join(dir, "server"));
-	expect(cwdOf("escapes")).toBe(dir);
+	expect(cwdOf("bare")).toBe(resolve(dir));
+	expect(cwdOf("dot")).toBe(resolve(dir));
+	expect(cwdOf("nested")).toBe(resolve(dir, "server"));
+	expect(cwdOf("escapes")).toBe(resolve(dir));
 	expect(cwdOf("absolute")).toBe("/opt/elsewhere");
 	// A remote server is never spawned, so it is given no working directory.
 	expect(cwdOf("remote")).toBeUndefined();
