@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 import lockfile from "proper-lockfile";
 import { resolveStepHomeDir } from "./environment.ts";
 import type { StepPluginProvision } from "./plugins.ts";
+import { redactSecretString } from "./secret-redaction.ts";
 
 const execFileAsync = promisify(execFile);
 export const DEFAULT_STEPPAGE_INSTALLER_URL = "https://dl.stepfun.com/steppage-mcp/p/install.sh";
@@ -66,9 +67,27 @@ function pathValueOf(env: NodeJS.ProcessEnv): string | undefined {
 	return key ? env[key] : undefined;
 }
 
-/** The Windows wrapper installed next to the bundle; a bare ESM file must run via node. */
-export function renderStepPageWrapper(bundlePath: string): string {
-	return `@echo off\r\nnode "${bundlePath}" %*\r\n`;
+/**
+ * Resolve Node from absolute PATH entries only. In a compiled Step binary,
+ * process.execPath is Step itself, so it cannot be used as the bundle runtime.
+ */
+export function windowsNodeCommandCandidates(
+	pathValue?: string,
+	fileExists: (path: string) => boolean = existsSync,
+): string[] {
+	const candidates: string[] = [];
+	for (const rawEntry of (pathValue ?? "").split(";")) {
+		const entry = rawEntry.trim().replace(/^"(.*)"$/u, "$1");
+		if (!entry || !(win32.isAbsolute(entry) || isAbsolute(entry))) continue;
+		const candidate = join(entry, "node.exe");
+		if (!candidates.includes(candidate) && fileExists(candidate)) candidates.push(candidate);
+	}
+	return candidates;
+}
+
+/** The Windows wrapper installed next to the bundle; pin Node so cwd shims cannot hijack it. */
+export function renderStepPageWrapper(bundlePath: string, nodePath: string): string {
+	return `@echo off\r\n"${nodePath}" "${bundlePath}" %*\r\n`;
 }
 
 /** Default executable ownership may survive in an old global declaration. */
@@ -161,23 +180,32 @@ async function findHealthyStepPage(
 	return undefined;
 }
 
-async function assertNodeRuntime(env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<void> {
+async function resolveNodeRuntime(
+	env: NodeJS.ProcessEnv,
+	signal: AbortSignal,
+	platform: NodeJS.Platform,
+): Promise<string> {
+	// Preserve the existing POSIX probe. Windows must use the same absolute
+	// executable for this check and for the wrapper written after it.
+	const command = platform === "win32" ? windowsNodeCommandCandidates(pathValueOf(env))[0] : "node";
+	if (!command) throw new Error("Node.js >= 20 is required for StepPage; install Node.js and retry.");
 	let nodeVersion: string;
 	try {
-		nodeVersion = (await execFileAsync("node", ["--version"], { env, signal, timeout: 5_000 })).stdout.trim();
+		nodeVersion = (await execFileAsync(command, ["--version"], { env, signal, timeout: 5_000 })).stdout.trim();
 	} catch {
 		signal.throwIfAborted();
 		throw new Error("Node.js >= 20 is required for StepPage; install Node.js and retry.");
 	}
 	const major = /^v(\d+)\./u.exec(nodeVersion)?.[1];
 	if (!major || Number(major) < 20) throw new Error(`Node.js >= 20 is required for StepPage; found ${nodeVersion}.`);
+	return command;
 }
 
 /**
  * Windows cannot run the POSIX installer script, so install the published bundle
  * directly: download it, then write the `cmd` wrapper the bundle needs to run.
  */
-async function installStepPageOnWindows(env: NodeJS.ProcessEnv, signal: AbortSignal): Promise<void> {
+async function installStepPageOnWindows(env: NodeJS.ProcessEnv, signal: AbortSignal, nodePath: string): Promise<void> {
 	const home = resolveStepHomeDir(env);
 	const bundleDir = join(home, ".steppage-mcp", "bin");
 	const bundlePath = join(bundleDir, "steppage-mcp.mjs");
@@ -191,7 +219,7 @@ async function installStepPageOnWindows(env: NodeJS.ProcessEnv, signal: AbortSig
 		timeout: 35_000,
 		maxBuffer: 8_192,
 	});
-	await writeFile(wrapperPath, renderStepPageWrapper(bundlePath));
+	await writeFile(wrapperPath, renderStepPageWrapper(bundlePath, nodePath));
 }
 
 /** Repair the managed executable without changing plugin manifests or credentials. */
@@ -228,8 +256,8 @@ export async function ensureStepPageReady(
 		// Another Step process may have completed installation while we waited.
 		const available = await findHealthyStepPage(env, signal, platform);
 		if (available) return { command: available, installed: false };
-		await assertNodeRuntime(env, signal);
-		if (platform === "win32") await installStepPageOnWindows(env, signal);
+		const nodePath = await resolveNodeRuntime(env, signal, platform);
+		if (platform === "win32") await installStepPageOnWindows(env, signal, nodePath);
 		else {
 			// Download before executing so a failed curl cannot be hidden by `| sh`.
 			const script = await execFileAsync("curl", ["-fsSL", "--max-time", "30", stepPageInstallerUrl(env)], {
@@ -258,7 +286,9 @@ export async function ensureStepPageReady(
 				: `Install it with: ${installer}, then restart Step. You can also run: step mcp prepare, then restart Step.`;
 		return {
 			installed: false,
-			error: `StepPage is not ready: ${detail.slice(-2_000)} Step remains usable; StepPage setup will retry on the next launch. ${manual}`,
+			error: redactSecretString(
+				`StepPage is not ready: ${detail.slice(-2_000)} Step remains usable; StepPage setup will retry on the next launch. ${manual}`,
+			),
 		};
 	} finally {
 		await release?.().catch(() => undefined);
