@@ -48,9 +48,24 @@ test("missing StepPage executable hint does not print mirror credentials", () =>
 		command: "steppage-mcp",
 		provision: { command: "steppage-mcp", installer: "steppageInstaller" },
 		error: Object.assign(new Error("spawn steppage-mcp ENOENT"), { code: "ENOENT" }),
+		platform: "linux",
 		env: { STEPCODE_STEPPAGE_INSTALLER_URL: "https://alice:hunter2@mirror.example/install.sh?token=abc123" },
 	});
 	expect(message).toContain("curl -fsSL 'https://[redacted]@mirror.example/install.sh?token=[redacted]' | sh");
+	for (const secret of ["alice", "hunter2", "abc123"]) expect(message).not.toContain(secret);
+});
+
+test("Windows missing StepPage executable hint points to native preparation", () => {
+	const message = describeMcpStartFailure({
+		name: "steppage__steppage",
+		command: "steppage-mcp",
+		provision: { command: "steppage-mcp", installer: "steppageInstaller" },
+		error: Object.assign(new Error("spawn steppage-mcp ENOENT"), { code: "ENOENT" }),
+		platform: "win32",
+		env: { STEPCODE_STEPPAGE_INSTALLER_URL: "https://alice:hunter2@mirror.example/install.sh?token=abc123" },
+	});
+	expect(message).toContain("step mcp prepare");
+	expect(message).not.toContain("| sh");
 	for (const secret of ["alice", "hunter2", "abc123"]) expect(message).not.toContain(secret);
 });
 
@@ -149,6 +164,7 @@ test("a missing executable is reported with the installer command instead of a r
 		error: Object.assign(new Error("spawn steppage-mcp ENOENT"), {
 			code: "ENOENT",
 		}),
+		platform: "linux",
 		env: {},
 	});
 
@@ -166,6 +182,7 @@ test("the installer override is honoured in the guidance", () => {
 		error: Object.assign(new Error("spawn steppage-mcp ENOENT"), {
 			code: "ENOENT",
 		}),
+		platform: "linux",
 		env: { STEPCODE_STEPPAGE_INSTALLER_URL: "https://example.test/install.sh" },
 	});
 

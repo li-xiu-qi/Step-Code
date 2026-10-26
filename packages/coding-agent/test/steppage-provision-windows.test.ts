@@ -8,16 +8,21 @@ import { afterEach, expect, test, vi } from "vitest";
 const handlers = vi.hoisted(() => ({
 	nodeVersion: "v24.0.0",
 	nodeCalls: [] as string[],
+	commandInterpreterCalls: [] as string[],
+	commandInterpreterCommands: [] as string[],
+	commandInterpreterCwds: [] as Array<string | undefined>,
+	curlCalls: [] as string[],
 	onCurl: undefined as undefined | ((args: readonly string[]) => void),
 	commandExists: (_command: string): boolean => false,
 }));
 
 // steppage-provision.ts promisifies execFile, so the mock must publish the same
 // promisify.custom contract the real child_process.execFile exposes.
-vi.mock("node:child_process", () => {
+vi.mock("node:child_process", async () => {
+	const path = await import("node:path");
 	const promisifyCustom = Symbol.for("nodejs.util.promisify.custom");
 	const execFile = vi.fn();
-	const custom = vi.fn((file: string, args: readonly string[] = []) => {
+	const custom = vi.fn((file: string, args: readonly string[] = [], options: { cwd?: string } = {}) => {
 		return new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
 			const notFound = (command: string) => {
 				const error: NodeJS.ErrnoException = new Error(`spawn ${command} ENOENT`);
@@ -27,11 +32,18 @@ vi.mock("node:child_process", () => {
 			if ((file === "node" || file.endsWith("node.exe")) && args[0] === "--version") {
 				handlers.nodeCalls.push(file);
 				resolve({ stdout: `${handlers.nodeVersion}\n`, stderr: "" });
-			} else if (file === "cmd" && args[0] === "/d" && args[1] === "/c") {
+			} else if ((file === "cmd" || file.endsWith("cmd.exe")) && args[0] === "/d" && args[1] === "/c") {
+				handlers.commandInterpreterCalls.push(file);
 				const command = args[2] ?? "";
-				if (!handlers.commandExists(command) || !command.endsWith(".cmd")) reject(notFound(command));
+				handlers.commandInterpreterCommands.push(command);
+				handlers.commandInterpreterCwds.push(options.cwd);
+				const resolvedCommand =
+					path.isAbsolute(command) || !options.cwd ? command : path.resolve(options.cwd, command);
+				if (!handlers.commandExists(resolvedCommand) || !resolvedCommand.endsWith(".cmd"))
+					reject(notFound(command));
 				else resolve({ stdout: "1.0.0\n", stderr: "" });
-			} else if (file === "curl") {
+			} else if (file === "curl" || file.endsWith("curl.exe")) {
+				handlers.curlCalls.push(file);
 				Promise.resolve()
 					.then(() => handlers.onCurl?.(args))
 					.then(
@@ -71,24 +83,37 @@ afterEach(async () => {
 	await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 	handlers.nodeVersion = "v24.0.0";
 	handlers.nodeCalls = [];
+	handlers.commandInterpreterCalls = [];
+	handlers.commandInterpreterCommands = [];
+	handlers.commandInterpreterCwds = [];
+	handlers.curlCalls = [];
 	handlers.onCurl = undefined;
 	handlers.commandExists = () => false;
 });
 
-async function fixture() {
-	const root = await mkdtemp(join(tmpdir(), "steppage-windows-"));
-	roots.push(root);
+async function fixture(subdirectory = "") {
+	const container = await mkdtemp(join(tmpdir(), "steppage-windows-"));
+	const root = join(container, subdirectory);
+	roots.push(container);
 	await mkdir(join(root, "latest"), { recursive: true });
 	await writeFile(join(root, "latest", "steppage-mcp.mjs"), "// fixture bundle\n");
 	await mkdir(join(root, "bin"), { recursive: true });
 	await writeFile(join(root, "bin", "node.exe"), "");
+	await writeFile(join(root, "bin", "cmd.exe"), "");
+	await writeFile(join(root, "bin", "curl.exe"), "");
 	const env: NodeJS.ProcessEnv = {
 		HOME: root,
 		USERPROFILE: root,
 		PATH: join(root, "bin"),
 		STEPCODE_STEPPAGE_INSTALLER_URL: pathToFileURL(join(root, "installer.sh")).href,
 	};
-	return { root, env, node: join(root, "bin", "node.exe") };
+	return {
+		root,
+		env,
+		node: join(root, "bin", "node.exe"),
+		cmd: join(root, "bin", "cmd.exe"),
+		curl: join(root, "bin", "curl.exe"),
+	};
 }
 
 function managedWrapper(root: string): string {
@@ -100,7 +125,7 @@ function managedBundle(root: string): string {
 }
 
 test("bundle url derives from the installer url", () => {
-	expect(stepPageBundleUrl()).toBe("https://dl.stepfun.com/steppage-mcp/p/latest/steppage-mcp.mjs");
+	expect(stepPageBundleUrl({})).toBe("https://dl.stepfun.com/steppage-mcp/p/latest/steppage-mcp.mjs");
 	expect(stepPageBundleUrl({ STEPCODE_STEPPAGE_INSTALLER_URL: "https://mirror.example/steppage/install.sh" })).toBe(
 		"https://mirror.example/steppage/latest/steppage-mcp.mjs",
 	);
@@ -181,7 +206,7 @@ test("windows fails closed when node.exe is not on an absolute PATH entry", asyn
 });
 
 test("windows installs the published bundle and a cmd wrapper", async () => {
-	const f = await fixture();
+	const f = await fixture("home&%PATH%");
 	handlers.commandExists = (command) => command.endsWith(".cmd") && existsSync(command);
 	handlers.onCurl = (args) => {
 		const url = args.find((arg) => arg.startsWith("file://"));
@@ -195,9 +220,13 @@ test("windows installs the published bundle and a cmd wrapper", async () => {
 	});
 	expect(await readFile(managedBundle(f.root), "utf8")).toBe("// fixture bundle\n");
 	expect(await readFile(managedWrapper(f.root), "utf8")).toBe(renderStepPageWrapper(f.node, managedBundle(f.root)));
-	expect(await readFile(managedWrapper(f.root), "utf8")).toContain(`"${f.node}" "${managedBundle(f.root)}"`);
-	// The runtime check and the wrapper use the same absolute node.exe.
+	// Every Windows executable comes from an absolute PATH entry, not the working directory.
 	expect(handlers.nodeCalls).toEqual([f.node]);
+	expect(handlers.commandInterpreterCalls.length).toBeGreaterThan(0);
+	for (const interpreter of handlers.commandInterpreterCalls) expect(interpreter).toBe(f.cmd);
+	for (const command of handlers.commandInterpreterCommands) expect(command).toBe("steppage-mcp.cmd");
+	for (const cwd of handlers.commandInterpreterCwds) expect(cwd).toBe(dirname(managedWrapper(f.root)));
+	expect(handlers.curlCalls).toEqual([f.curl]);
 });
 
 test("windows reuses a healthy wrapper without downloading", async () => {
@@ -242,6 +271,25 @@ test("windows failure keeps Step usable and points at step mcp prepare", async (
 	expect(result.error).not.toContain("| sh");
 });
 
+test.each(["cmd.exe", "curl.exe"] as const)(
+	"windows fails closed when %s is not on an absolute PATH entry",
+	async (tool) => {
+		const f = await fixture();
+		await rm(tool === "cmd.exe" ? f.cmd : f.curl);
+		handlers.commandExists = (command) => command.endsWith(".cmd") && existsSync(command);
+		handlers.onCurl = (args) => {
+			const url = args.find((arg) => arg.startsWith("file://"));
+			const output = args[args.indexOf("-o") + 1];
+			if (!url || !output) throw new Error(`unexpected curl args: ${args.join(" ")}`);
+			return copyFile(fileURLToPath(url), output);
+		};
+		const result = await ensureStepPageReady({ env: f.env, platform: "win32" });
+		expect(result.installed).toBe(false);
+		expect(result.error).toContain(tool);
+		expect(existsSync(managedWrapper(f.root))).toBe(false);
+	},
+);
+
 test("redaction removes URL credentials and secret parameters but keeps the rest", () => {
 	expect(
 		redactStepPageSecrets(
@@ -263,6 +311,19 @@ test("redaction removes URL credentials and secret parameters but keeps the rest
 	expect(redactStepPageSecrets("value s3cr3t-value leaked", { MIRROR_TOKEN: "s3cr3t-value" })).toBe(
 		"value [redacted] leaked",
 	);
+});
+
+test("redaction covers quotes in raw and shell-escaped URLs", () => {
+	const raw =
+		"curl failed for https://alice:pa'hunter2@mirror.example/install.sh?token=abc'123&channel=preview#access_token=xyz'456";
+	const shell =
+		"curl -fsSL 'https://alice:pa'\\''hunter2@mirror.example/install.sh?token=abc'\\''123&channel=preview#access_token=xyz'\\''456' | sh";
+	for (const text of [raw, shell]) {
+		const result = redactStepPageSecrets(text, {});
+		for (const secret of ["alice", "hunter2", "abc", "xyz"]) expect(result).not.toContain(secret);
+		expect(result).toContain("[redacted]");
+		expect(result).toContain("channel=preview");
+	}
 });
 
 test.each(["win32", "linux"] as const)("%s failure text never contains mirror credentials", async (platform) => {

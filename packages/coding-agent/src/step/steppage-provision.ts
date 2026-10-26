@@ -1,7 +1,7 @@
 import { execFile, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
-import { isAbsolute, join, win32 } from "node:path";
+import { basename, dirname, isAbsolute, join, win32 } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
 import lockfile from "proper-lockfile";
@@ -68,6 +68,19 @@ function absoluteWindowsPathEntries(pathValue: string | undefined): string[] {
 	return entries;
 }
 
+/** Resolve a Windows executable without letting the process search the working directory. */
+function resolveWindowsExecutable(
+	executable: string,
+	pathValue: string | undefined,
+	fileExists: (path: string) => boolean = existsSync,
+): string | undefined {
+	for (const entry of absoluteWindowsPathEntries(pathValue)) {
+		const candidate = join(entry, executable);
+		if (fileExists(candidate)) return candidate;
+	}
+	return undefined;
+}
+
 /**
  * The Node.js executable that checks the runtime and runs the bundle. On Windows
  * `cmd` searches the working directory before PATH, so a bare `node` in the
@@ -81,11 +94,7 @@ export function resolveNodeExecutable(
 	fileExists: (path: string) => boolean = existsSync,
 ): string | undefined {
 	if (platform !== "win32") return "node";
-	for (const entry of absoluteWindowsPathEntries(pathValue)) {
-		const candidate = join(entry, "node.exe");
-		if (fileExists(candidate)) return candidate;
-	}
-	return undefined;
+	return resolveWindowsExecutable("node.exe", pathValue, fileExists);
 }
 
 function pathValueOf(env: NodeJS.ProcessEnv): string | undefined {
@@ -106,7 +115,9 @@ export function renderStepPageWrapper(nodePath: string, bundlePath: string): str
 const SECRET_PARAMETER = /token|key|secret|passw(?:or)?d|pwd|auth|credential|signature|sig$|session/iu;
 
 function redactUrl(url: string): string {
-	return url
+	const trailingQuotes = /['"]*$/u.exec(url)?.[0] ?? "";
+	const target = url.slice(0, url.length - trailingQuotes.length);
+	return `${target
 		.replace(/^([a-z][a-z\d+.-]*:\/\/)[^/?#\s]*@/iu, "$1[redacted]@")
 		.replace(/([?&;#])([^=&;#]+)=([^&;#]*)/gu, (match, separator: string, name: string, value: string) => {
 			let decoded = name;
@@ -114,7 +125,7 @@ function redactUrl(url: string): string {
 				decoded = decodeURIComponent(name);
 			} catch {}
 			return value && SECRET_PARAMETER.test(decoded) ? `${separator}${name}=[redacted]` : match;
-		});
+		})}${trailingQuotes}`;
 }
 
 /**
@@ -124,7 +135,7 @@ function redactUrl(url: string): string {
  * it came from a curl error or from the manual install hint.
  */
 export function redactStepPageSecrets(text: string, env: NodeJS.ProcessEnv = process.env): string {
-	let redacted = text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s"'<>`]+/giu, redactUrl);
+	let redacted = text.replace(/\b[a-z][a-z\d+.-]*:\/\/[^\s<>`]+/giu, redactUrl);
 	for (const [key, value] of Object.entries(env)) {
 		if (value && value.length >= 4 && /key|token|secret|password|authorization/iu.test(key))
 			redacted = redacted.replaceAll(value, "[redacted]");
@@ -195,12 +206,18 @@ async function probeStepPageVersion(
 	signal: AbortSignal | undefined,
 	platform: NodeJS.Platform,
 ): Promise<string | undefined> {
+	const file = platform === "win32" ? resolveWindowsExecutable("cmd.exe", pathValueOf(env)) : command;
+	if (!file) return undefined;
+	// Only the fixed wrapper basename enters cmd parsing; metacharacters in its directory stay in cwd.
+	const args = platform === "win32" ? ["/d", "/c", basename(command), "--version"] : ["--version"];
 	try {
-		const [file, args] =
-			platform === "win32"
-				? (["cmd", ["/d", "/c", command, "--version"]] as const)
-				: ([command, ["--version"]] as const);
-		const result = await execFileAsync(file, [...args], { env, signal, timeout: 5_000, maxBuffer: 8_192 });
+		const result = await execFileAsync(file, args, {
+			env,
+			signal,
+			timeout: 5_000,
+			maxBuffer: 8_192,
+			...(platform === "win32" ? { cwd: dirname(command) } : {}),
+		});
 		const version = result.stdout.trim();
 		if (/^v?\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/u.test(version)) return version;
 	} catch {
@@ -247,6 +264,13 @@ async function assertNodeRuntime(
  * directly: download it, then write the `cmd` wrapper the bundle needs to run.
  */
 async function installStepPageOnWindows(env: NodeJS.ProcessEnv, signal: AbortSignal, nodePath: string): Promise<void> {
+	const pathValue = pathValueOf(env);
+	// The post-install probe needs cmd.exe. Check it and curl before downloading anything.
+	if (!resolveWindowsExecutable("cmd.exe", pathValue)) {
+		throw new Error("StepPage requires cmd.exe on an absolute PATH entry.");
+	}
+	const curl = resolveWindowsExecutable("curl.exe", pathValue);
+	if (!curl) throw new Error("StepPage requires curl.exe on an absolute PATH entry.");
 	const home = resolveStepHomeDir(env);
 	const bundleDir = join(home, ".steppage-mcp", "bin");
 	const bundlePath = join(bundleDir, "steppage-mcp.mjs");
@@ -254,7 +278,7 @@ async function installStepPageOnWindows(env: NodeJS.ProcessEnv, signal: AbortSig
 	await mkdir(bundleDir, { recursive: true, mode: 0o700 });
 	await mkdir(join(home, ".local", "bin"), { recursive: true });
 	// Download before writing the wrapper so a failed transfer cannot hide behind a stale one.
-	await execFileAsync("curl", ["-fsSL", "--max-time", "30", stepPageBundleUrl(env), "-o", bundlePath], {
+	await execFileAsync(curl, ["-fsSL", "--max-time", "30", stepPageBundleUrl(env), "-o", bundlePath], {
 		env,
 		signal,
 		timeout: 35_000,

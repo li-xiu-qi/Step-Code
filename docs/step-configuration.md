@@ -231,9 +231,9 @@ On Windows the published bundle is downloaded directly and wrapped in a
 `steppage-mcp.cmd` launcher under `~/.local/bin`, because the POSIX installer
 script cannot run there; `step mcp prepare` probes that wrapper through
 `cmd /c` so no shell PATH change is required.
-The launcher names `node.exe` by the absolute path found on an absolute PATH
-entry, the same executable that passed the Node.js >= 20 check, so a `node.cmd`
-in the working directory cannot be run in its place.
+Windows resolves `node.exe`, `cmd.exe`, and `curl.exe` only from absolute PATH
+entries, so the working directory cannot supply those executables. The launcher
+uses the same `node.exe` that passed the Node.js >= 20 check.
 `STEPCODE_STEPPAGE_INSTALLER_URL` can select a channel or mirror. Windows derives
 the sibling `latest/steppage-mcp.mjs` path with URL parsing and preserves the
 configured URL's authentication parameters and encoding.
