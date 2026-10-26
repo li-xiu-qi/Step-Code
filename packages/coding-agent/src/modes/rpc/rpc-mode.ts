@@ -777,6 +777,16 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 			return;
 		}
 
+		// JSON primitives and arrays are not RPC command objects. Guard before casting:
+		// otherwise null makes handleCommand and the catch below throw while reading
+		// command.id, and arrays fall through to an "Unknown command: undefined"
+		// response. Emit a parse error instead, like other bad input.
+		if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
+			output(error(undefined, "parse", "Failed to parse command: expected a JSON object"));
+			await waitForRawStdoutBackpressure();
+			return;
+		}
+
 		const command = parsed as RpcCommand;
 		try {
 			const response = await handleCommand(command);
@@ -803,9 +813,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 	process.stdin.on("end", onInputEnd);
 
 	detachInput = (() => {
-		const detachJsonl = attachJsonlLineReader(process.stdin, (line) => {
-			void handleInputLine(line);
-		});
+		const detachJsonl = attachJsonlLineReader(process.stdin, (line) => handleInputLine(line));
 		return () => {
 			detachJsonl();
 			process.stdin.off("end", onInputEnd);
