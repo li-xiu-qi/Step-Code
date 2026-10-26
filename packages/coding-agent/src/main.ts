@@ -89,7 +89,7 @@ import { hasTrustRequiringProjectResources, ProjectTrustStore } from "./core/tru
 import { builtInExtensions } from "./features/index.ts";
 import { childSessionHeader } from "./features/step-subagent.ts";
 import { runMigrations, showDeprecationWarnings } from "./migrations.ts";
-import { runPrintMode, runRpcMode } from "./modes/index.ts";
+import { runAcpMode, runPrintMode, runRpcMode } from "./modes/index.ts";
 import type { InteractiveModeOptions, StartupTuiPathOptions, StartupUiHooks } from "./modes/interactive-contract.ts";
 import { handleConfigCommand, handlePackageCommand } from "./package-manager-cli.ts";
 import {
@@ -152,8 +152,8 @@ export function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: b
 		// headless mode so normal piped-prompt handling never consumes the stream.
 		return "rpc";
 	}
-	if (parsed.mode === "rpc") {
-		return "rpc";
+	if (parsed.mode === "rpc" || parsed.mode === "acp") {
+		return parsed.mode;
 	}
 	if (parsed.mode === "json") {
 		return "json";
@@ -164,7 +164,7 @@ export function resolveAppMode(parsed: Args, stdinIsTTY: boolean, stdoutIsTTY: b
 	return "interactive";
 }
 
-export function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc"> {
+export function toPrintOutputMode(appMode: AppMode): Exclude<Mode, "rpc" | "acp"> {
 	return appMode === "json" ? "json" : "text";
 }
 
@@ -1028,8 +1028,8 @@ export async function prepareMain(args: string[], options?: MainOptions): Promis
 		takeOverStdout();
 	}
 
-	if (parsed.mode === "rpc" && parsed.fileArgs.length > 0) {
-		console.error(chalk.red("Error: @file arguments are not supported in RPC mode"));
+	if ((parsed.mode === "rpc" || parsed.mode === "acp") && parsed.fileArgs.length > 0) {
+		console.error(chalk.red(`Error: @file arguments are not supported in ${parsed.mode.toUpperCase()} mode`));
 		return { kind: "completed", exitCode: 1 };
 	}
 
@@ -1426,8 +1426,8 @@ export async function prepareMain(args: string[], options?: MainOptions): Promis
 		return { kind: "completed", drainNaturally: true };
 	}
 
-	// RPC refreshes catalogs here in the background; interactive mode starts its refresh after TUI initialization.
-	if (!options?.disableBackgroundServices && appMode === "rpc") {
+	// RPC and ACP refresh catalogs here in the background; interactive mode starts its refresh after TUI initialization.
+	if (!options?.disableBackgroundServices && (appMode === "rpc" || appMode === "acp")) {
 		const controller = new AbortController();
 		const timeout = setTimeout(() => controller.abort(), 15_000);
 		void modelRuntime
@@ -1470,6 +1470,8 @@ async function dispatchAppMode(
 	const { appMode, runtimeHost } = prep;
 	if (appMode === "rpc") {
 		await runRpcMode(runtimeHost);
+	} else if (appMode === "acp") {
+		await runAcpMode(runtimeHost);
 	} else if (appMode === "interactive") {
 		// The interactive TUI moved to @step-harness/cli (S4-0). coding-agent's own
 		// main() no longer dispatches it; product shells construct InteractiveMode

@@ -172,19 +172,22 @@ export function registerPlanModeTools(pi: ExtensionAPI, planMode: StepPlanModeCo
 				planContents,
 				planHash,
 				planModeExited: !planMode.isPlanModeActive(),
-				approvalSource: ctx.mode === "rpc" || !ctx.hasUI ? "external" : "user",
+				approvalSource: ctx.mode === "rpc" || ctx.mode === "acp" || !ctx.hasUI ? "external" : "user",
 				outcome,
 				...(feedback === undefined ? {} : { feedback }),
 			});
-			if (ctx.mode === "rpc") {
-				// An rpc child has a dialog bridge (hasUI is true) but no real user
+			if (ctx.mode === "rpc" || ctx.mode === "acp") {
+				// An rpc/acp child has a dialog bridge (hasUI is true) but no real user
 				// behind it, so its extension_ui_request select can be auto-cancelled
 				// to "Stay", leaving the child idle in plan mode forever. Exit plan mode
 				// and hand approval to the caller.
 				planMode.exitPlanMode("auto_rpc", ctx);
-				ctx.ui.notify("rpc child auto-approved plan mode exit — user oversight was not gated", "warning");
+				ctx.ui.notify(
+					"headless protocol child auto-approved plan mode exit — user oversight was not gated",
+					"warning",
+				);
 				return reviewedResult(
-					`Cannot gate approval in rpc child context. Plan file at ${planFilePath}; caller should approve externally. Plan mode exited and file mutations are re-enabled.\n\nPlan contents:\n${planContents}`,
+					`Cannot gate approval in a headless protocol child context. Plan file at ${planFilePath}; caller should approve externally. Plan mode exited and file mutations are re-enabled.\n\nPlan contents:\n${planContents}`,
 					reviewed("external_approval_required"),
 				);
 			}

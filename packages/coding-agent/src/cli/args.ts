@@ -15,7 +15,7 @@ import type {
 	StepToolPermissionMode,
 } from "../step/permissions.ts";
 
-export type Mode = "text" | "json" | "rpc";
+export type Mode = "text" | "json" | "rpc" | "acp";
 
 export interface Args {
 	provider?: string;
@@ -213,7 +213,7 @@ export function parseArgs(args: string[]): Args {
 			const taken = takeOptionValue(args, i, "--mode", result);
 			if (taken) {
 				i = taken.nextIndex;
-				if (taken.value === "text" || taken.value === "json" || taken.value === "rpc") {
+				if (taken.value === "text" || taken.value === "json" || taken.value === "rpc" || taken.value === "acp") {
 					result.mode = taken.value;
 				}
 			}
@@ -574,7 +574,7 @@ export function parseArgs(args: string[]): Args {
 
 	if (result.completionCheck) {
 		result.completionCheckAttempts ??= 2;
-		if (result.mode === "rpc" || result.sdkStdio) {
+		if (result.mode === "rpc" || result.mode === "acp" || result.sdkStdio) {
 			result.diagnostics.push({
 				type: "error",
 				message: "--completion-check is only supported in print or JSON mode",
@@ -586,7 +586,11 @@ export function parseArgs(args: string[]): Args {
 			message: "--completion-check-attempts requires --completion-check git-committed",
 		});
 	}
-	if (result.completionReview && !result.completionCheck && (result.mode === "rpc" || result.sdkStdio)) {
+	if (
+		result.completionReview &&
+		!result.completionCheck &&
+		(result.mode === "rpc" || result.mode === "acp" || result.sdkStdio)
+	) {
 		result.diagnostics.push({
 			type: "error",
 			message: "--completion-review is only supported in print or JSON mode",
@@ -667,7 +671,7 @@ ${chalk.bold("Options:")}
   --api-key <key>                API key (defaults to env vars)
   --system-prompt <text>         System prompt (default: coding assistant prompt)
   --append-system-prompt <text>  Append text or file contents to the system prompt (can be used multiple times)
-  --mode <mode>                  Output mode: text (default), json, or rpc
+  --mode <mode>                  Output mode: text (default), json, rpc, or acp
 ${stepPermissionOptionsText}
   --sdk-stdio                    Run the Step Agent SDK length-prefixed stdio host
   --print, -p                    Non-interactive mode: process prompt and exit
