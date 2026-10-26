@@ -537,7 +537,7 @@ test.each([true, false])("rpc-mode exit_plan_mode hands approval to the caller (
 	expect(result.content).toEqual([
 		{
 			type: "text",
-			text: `Cannot gate approval in rpc child context. Plan file at ${planPath}; caller should approve externally. Plan mode exited and file mutations are re-enabled.\n\nPlan contents:\n${planContents}`,
+			text: `Cannot gate approval in a headless protocol child context. Plan file at ${planPath}; caller should approve externally. Plan mode exited and file mutations are re-enabled.\n\nPlan contents:\n${planContents}`,
 		},
 	]);
 	expect(result.details).toEqual({
@@ -559,7 +559,8 @@ test.each([true, false])("rpc-mode exit_plan_mode hands approval to the caller (
 	expect(
 		harness.notifications.some(
 			(notification) =>
-				notification.type === "warning" && notification.message.includes("rpc child auto-approved plan mode exit"),
+				notification.type === "warning" &&
+				notification.message.includes("headless protocol child auto-approved plan mode exit"),
 		),
 	).toBe(true);
 	expect(events.at(-1)).toEqual({
