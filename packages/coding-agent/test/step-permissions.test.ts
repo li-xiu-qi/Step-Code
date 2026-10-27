@@ -232,6 +232,156 @@ describe("Step permission presets", () => {
 		).toBe("confirm");
 	});
 
+	describe("workflow tool calls", () => {
+		const inlineScript = [
+			"const findings = [];",
+			"for (const item of items) {",
+			"  findings.push(agent('review ' + item));",
+			"}",
+			"return findings.filter(Boolean);",
+		].join("\n");
+		/**
+		 * A template literal is not a shell quote, so this is the shape the Bash
+		 * analyzer used to parse and match a hazard rule on. Single- and
+		 * double-quoted strings are read as shell quotes and come back `ordinary`,
+		 * which Approve for Me already allowed, so they prove nothing here.
+		 */
+		const hazardousScript = ["const cleanup = `rm -rf ./tmp/cache`;", "return cleanup;"].join("\n");
+		const wipe = "rm -rf /etc";
+		const matrix = [
+			{ preset: "ask", action: "confirm" },
+			{ preset: "approve-for-me", action: "allow" },
+			{ preset: "full-access", action: "allow" },
+		] as const;
+
+		it.each(matrix)("decides an inline script under $preset", ({ preset, action }) => {
+			const decision = decideStepToolCall(
+				"workflow",
+				{ script: inlineScript },
+				stepPermissionStateForPreset(preset),
+			);
+			expect(decision).toMatchObject({ action, hazardous: false });
+			expect(decision.analysisIncomplete).toBeUndefined();
+		});
+
+		it.each(matrix)("honors explicit workflow overrides under $preset", ({ preset }) => {
+			expect(
+				decideStepToolCall("workflow", { script: inlineScript }, stepPermissionStateForPreset(preset), {
+					workflow: "deny",
+				}).action,
+			).toBe("deny");
+			expect(
+				decideStepToolCall("workflow", { script: inlineScript }, stepPermissionStateForPreset(preset), {
+					workflow: "allow",
+				}).action,
+			).toBe("allow");
+		});
+
+		it("does not read a sandboxed script as a dangerous shell command", () => {
+			const decision = decideStepToolCall(
+				"workflow",
+				{ script: hazardousScript },
+				stepPermissionStateForPreset("approve-for-me"),
+			);
+			expect(decision).toMatchObject({ action: "allow", hazardous: false });
+			expect(decision.analysisIncomplete).toBeUndefined();
+		});
+
+		it.each(["command", "cmd"] as const)("keeps workflow.%s analyzable", (key) => {
+			const decision = decideStepToolCall(
+				"workflow",
+				{ [key]: wipe },
+				stepPermissionStateForPreset("approve-for-me"),
+			);
+			expect(decision).toMatchObject({ action: "confirm", hazardous: true });
+		});
+
+		it("allows the saved-name and scriptPath workflow forms under Approve for Me", () => {
+			for (const input of [{ name: "audit" }, { scriptPath: "./audit.js" }]) {
+				expect(decideStepToolCall("workflow", input, stepPermissionStateForPreset("approve-for-me")).action).toBe(
+					"allow",
+				);
+			}
+		});
+
+		it("still analyzes real shell tools, so the workflow exemption cannot leak", () => {
+			const analyzed: [toolName: string, input: Record<string, unknown>][] = [
+				["run_command", { command: wipe }],
+				["bash", { script: wipe }],
+				["workflow_helper", { command: wipe }],
+				["workflow_helper", { script: wipe }],
+				["my_script_runner", { script: wipe }],
+				["workflow-runner", { script: wipe }],
+			];
+			for (const [toolName, input] of analyzed) {
+				const decision = decideStepToolCall(toolName, input, stepPermissionStateForPreset("ask"));
+				expect(decision, toolName).toMatchObject({ action: "confirm", hazardous: true });
+				expect(decision.reason, toolName).toMatch(/Dangerous command requires confirmation/);
+				expect(decision.reason, toolName).not.toMatch(/can modify the workspace/);
+			}
+		});
+
+		it("exempts only workflow.script, whatever the casing or padding of the tool name", () => {
+			for (const toolName of ["workflow", "WORKFLOW", " WorkFlow "]) {
+				const exempt = decideStepToolCall(
+					toolName,
+					{ script: hazardousScript },
+					stepPermissionStateForPreset("ask"),
+				);
+				expect(exempt, toolName).toMatchObject({ action: "confirm", hazardous: false });
+				expect(exempt.reason, toolName).toMatch(/can modify the workspace/);
+				expect(exempt.analysisIncomplete, toolName).toBeUndefined();
+				expect(
+					decideStepToolCall(
+						toolName,
+						{ script: hazardousScript },
+						stepPermissionStateForPreset("approve-for-me"),
+					),
+					toolName,
+				).toMatchObject({ action: "allow", hazardous: false });
+				expect(
+					decideStepToolCall(`${toolName}_helper`, { script: wipe }, stepPermissionStateForPreset("ask")),
+					toolName,
+				).toMatchObject({ action: "confirm", hazardous: true });
+			}
+		});
+
+		it("runs the workflow hook without prompting under Approve for Me", async () => {
+			const controller = new StepPermissionController({ env: {}, initialPreset: "approve-for-me" });
+			const confirm = vi.fn(async () => true);
+			const context = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+			const event = {
+				type: "tool_call",
+				toolName: "workflow",
+				toolCallId: "workflow-12345678",
+				input: { script: inlineScript },
+			} as const;
+
+			expect(await controller.handleToolCall(event, context)).toBeUndefined();
+			expect(await controller.handleToolCall(event, { hasUI: false } as ExtensionContext)).toBeUndefined();
+			expect(confirm).not.toHaveBeenCalled();
+		});
+
+		it("still asks interactively under Ask and blocks when unattended", async () => {
+			const controller = new StepPermissionController({ env: {}, initialPreset: "ask" });
+			const confirm = vi.fn(async () => false);
+			const context = { hasUI: true, ui: { confirm } } as unknown as ExtensionContext;
+			const event = {
+				type: "tool_call",
+				toolName: "workflow",
+				toolCallId: "workflow-87654321",
+				input: { script: inlineScript },
+			} as const;
+
+			expect(await controller.handleToolCall(event, context)).toMatchObject({ block: true });
+			expect(confirm).toHaveBeenCalledTimes(1);
+			expect(await controller.handleToolCall(event, { hasUI: false } as ExtensionContext)).toMatchObject({
+				block: true,
+				terminate: true,
+			});
+		});
+	});
+
 	it.each([true, false])("identifies each approval without changing the decision (approved=%s)", async (approved) => {
 		const controller = new StepPermissionController({
 			env: {},

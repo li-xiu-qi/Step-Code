@@ -100,6 +100,18 @@ const WRITE_OR_EXECUTE_TOOLS = new Set([
 	"user_bash",
 ]);
 
+/**
+ * Tools whose `script` argument is program source rather than a shell command.
+ *
+ * `workflow` runs JavaScript in a sandboxed VM with no process, require, or
+ * network, so its script never reaches a shell. Extracting it as a command made
+ * every ordinary multi-line script read as "unresolved" and a script that merely
+ * mentioned a dangerous command (inside a template literal, for example) read as
+ * a hazardous match. Under Approve for Me both outcomes pinned the call behind a
+ * confirmation the user never actually needed.
+ */
+const NON_SHELL_SCRIPT_TOOLS = new Set(["workflow"]);
+
 /** Backoff shared with the previous Step gateway host (5s, 15s, 45s, 2m, 5m). */
 const DEFAULT_AUTO_RESUME_DELAYS_MS = [5_000, 15_000, 45_000, 120_000, 300_000] as const;
 /** Unattended continuations are deliberately capped even when the ladder is extended. */
@@ -407,6 +419,10 @@ function combineThenRunDecisions(
  * conservative for unknown tools: ask mode confirms them, Approve for Me
  * permits them unless the call is hazardous or its analysis is incomplete, and
  * Full Access permits everything (see skipCommandPolicy).
+ *
+ * Command analysis only applies to fields that actually carry shell commands.
+ * A non-shell `script` field (see NON_SHELL_SCRIPT_TOOLS) skips it, so sandboxed
+ * source is never misread as an unanalyzable or dangerous command.
  */
 export function decideStepToolCall(
 	toolName: string,
@@ -423,7 +439,7 @@ export function decideStepToolCall(
 		return combineThenRunDecisions(mutation, verification, thenRun);
 	}
 	const normalizedName = toolName.trim().toLowerCase();
-	const command = extractCommand(input);
+	const command = extractCommand(normalizedName, input);
 	let analysis: CommandPolicyAnalysis | undefined;
 	if (command !== undefined) {
 		try {
@@ -761,8 +777,12 @@ function findToolOverride(
 	return undefined;
 }
 
-function extractCommand(input: Record<string, unknown>): string | undefined {
+function extractCommand(toolName: string, input: Record<string, unknown>): string | undefined {
 	for (const key of ["command", "cmd", "script"]) {
+		// Exempt only the field known to carry non-shell source. Keeping command
+		// and cmd analyzable avoids turning a tool-name exception into a blanket
+		// exemption if the tool's input contract later grows a real shell field.
+		if (key === "script" && NON_SHELL_SCRIPT_TOOLS.has(toolName)) continue;
 		const value = input[key];
 		if (typeof value === "string") return value;
 	}
