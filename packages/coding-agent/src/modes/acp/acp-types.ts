@@ -130,6 +130,107 @@ export type RequestPermissionResult =
 	| { outcome: { outcome: "cancelled" } }
 	| { outcome: { outcome: "selected"; optionId: string } };
 
+export type AcpProtocolVersion = 1 | 2;
+
+export interface ImplementationInfo {
+	name: string;
+	title?: string;
+	version: string;
+}
+
+export interface InitializeResultV2 {
+	protocolVersion: 2;
+	info: ImplementationInfo;
+	capabilities: {
+		session: {
+			prompt: { image: Record<string, never> };
+		};
+	};
+	authMethods: [];
+}
+
+export interface SessionListParams {
+	cwd?: string;
+	cursor?: string;
+}
+
+export interface SessionListResult {
+	sessions: Array<{
+		sessionId: string;
+		cwd: string;
+		title?: string;
+		updatedAt?: string;
+		_meta?: Record<string, unknown>;
+	}>;
+	nextCursor?: string;
+}
+
+export interface ResumeParams {
+	sessionId: string;
+	cwd: string;
+	mcpServers?: unknown[];
+	replayFrom?: { type: string } | null;
+	additionalDirectories?: string[];
+}
+
+export interface CloseSessionParams {
+	sessionId: string;
+}
+
+export interface PromptResultV2 {
+	messageId: string;
+}
+
+export interface SessionUpdateMessageChunkV2 {
+	sessionUpdate: "user_message_chunk" | "agent_message_chunk" | "agent_thought_chunk";
+	messageId: string;
+	content: ContentBlock;
+}
+
+export interface SessionUpdateMessageV2 {
+	sessionUpdate: "user_message" | "agent_message" | "agent_thought";
+	messageId: string;
+	content: ContentBlock[];
+}
+
+export interface SessionUpdateStateV2 {
+	sessionUpdate: "state_update";
+	state: "running" | "idle" | "requires_action";
+	stopReason?: string;
+	error?: { code: number; message: string; data?: unknown };
+}
+
+export interface SessionUpdateToolCallV2 {
+	sessionUpdate: "tool_call_update";
+	toolCallId: string;
+	title?: string;
+	name?: string | null;
+	kind?: string;
+	status?: "pending" | "in_progress" | "completed" | "failed" | "cancelled";
+	content?: unknown[] | null;
+	rawInput?: unknown;
+	rawOutput?: unknown;
+}
+
+export interface SessionUpdateNoticeV2 {
+	sessionUpdate: "notice";
+	severity: "info" | "warning" | "error";
+	title: string;
+	description?: string | null;
+}
+
+export type SessionUpdateV2 =
+	| SessionUpdateMessageChunkV2
+	| SessionUpdateMessageV2
+	| SessionUpdateStateV2
+	| SessionUpdateToolCallV2
+	| SessionUpdateNoticeV2;
+
+export interface SessionNotificationParamsV2 {
+	sessionId: string;
+	update: SessionUpdateV2;
+}
+
 export const ACP_PROTOCOL_VERSION = 1;
 
 export const ACP_JSON_RPC_ERRORS = {
@@ -140,4 +241,5 @@ export const ACP_JSON_RPC_ERRORS = {
 	internal: -32603,
 	notInitialized: -32002,
 	unavailable: -32003,
+	requestCancelled: -32800,
 } as const;

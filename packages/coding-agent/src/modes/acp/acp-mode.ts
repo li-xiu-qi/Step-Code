@@ -1,28 +1,26 @@
 /**
- * ACP mode: native stdio JSON-RPC for Agent Client Protocol v1.
+ * ACP mode: native stdio JSON-RPC for Agent Client Protocol v1 and v2.
  *
- * This mode exposes the baseline ACP client surface over newline-delimited
- * JSON-RPC 2.0 on stdin/stdout. It reuses the same `AgentSessionRuntimeHost`
- * as the interactive TUI and RPC mode, so session persistence, extensions,
- * compaction, and tool execution behave identically. Only the wire format is
- * different.
+ * This mode exposes the ACP client surface over newline-delimited JSON-RPC 2.0
+ * on stdin/stdout. It reuses the same `AgentSessionRuntimeHost` as the
+ * interactive TUI and RPC mode, so session persistence, extensions, compaction,
+ * and tool execution behave identically. Only the wire format is different.
  *
- * Supported methods:
- * - `initialize`
- * - `session/new`
- * - `session/load`
- * - `session/prompt`
- * - `session/cancel`
+ * v1 keeps the historical turn-pending prompt lifecycle. v2 negotiates the
+ * stable baseline: `session/new`, `session/list`, `session/resume`,
+ * `session/close`, `session/prompt`, `session/cancel`, and `session/update`,
+ * with insertion-acknowledged prompts and foreground `state_update` reporting.
  *
  * Agent-to-client traffic uses `session/update` notifications and
  * `session/request_permission` requests for tool approval.
  *
- * Not part of this first baseline: ACP `terminal/*`, session config options,
- * session modes, and client-provided MCP servers. Those need separate product
- * decisions and are documented as follow-up work.
+ * Not part of this baseline: ACP `terminal/*`, session config options, session
+ * modes, and client-provided MCP servers. Those need separate product decisions
+ * and are documented as follow-up work.
  */
 
 import * as crypto from "node:crypto";
+import type { AgentMessage } from "@step-harness/agent-core";
 import { VERSION } from "../../config.ts";
 import type { AgentSessionEvent } from "../../core/agent-session.ts";
 import type { AgentSessionRuntimeHost } from "../../core/agent-session-runtime.ts";
@@ -38,33 +36,49 @@ import {
 	waitForRawStdoutBackpressure,
 	writeRawStdout,
 } from "../../core/output-guard.ts";
-import { SessionManager } from "../../core/session-manager.ts";
+import { loadEntriesFromFile, type SessionEntry, SessionManager } from "../../core/session-manager.ts";
 import { type Theme, theme } from "../../theme/theme.ts";
 import { resolvePath } from "../../utils/paths.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { attachJsonlLineReader } from "../rpc/jsonl.ts";
 import type {
+	AcpProtocolVersion,
+	ContentBlock,
+	InitializeResultV2,
 	JsonRpcId,
 	JsonRpcRequest,
 	JsonRpcResponseObject,
 	PromptParams,
+	PromptResultV2,
 	RequestPermissionResult,
+	ResumeParams,
+	SessionListParams,
+	SessionListResult,
 	SessionNotificationParams,
+	SessionNotificationParamsV2,
+	SessionUpdateStateV2,
+	SessionUpdateV2,
 } from "./acp-types.ts";
 import { ACP_JSON_RPC_ERRORS, ACP_PROTOCOL_VERSION } from "./acp-types.ts";
 import {
 	createErrorResponse,
 	createNotification,
 	createResponse,
+	hasUnsupportedMcpServers,
+	negotiateProtocolVersion,
 	normalizePrompt,
+	parseInitializeParams,
 	parseJsonRpcLine,
 	parseRequestPermissionResult,
 	serializeJsonLine,
 	toSessionNotification,
-	validateInitializeParams,
+	toSessionNotificationV2,
+	validateCloseSessionParams,
 	validateLoadSessionParams,
 	validateNewSessionParams,
 	validatePromptParams,
+	validateResumeParams,
+	validateSessionListParams,
 } from "./acp-wire.ts";
 
 const PERMISSION_ALLOW_OPTION_ID = "allow_once";
@@ -77,6 +91,7 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 	let unsubscribeBackpressure: (() => void) | undefined;
 
 	let initialized = false;
+	let protocolVersion: AcpProtocolVersion = 1;
 	let shuttingDown = false;
 	let detachInput = () => {};
 	const signalCleanupHandlers: Array<() => void> = [];
@@ -84,6 +99,8 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 	const activePromptIds = new Set<JsonRpcId>();
 	const cancelledPromptIds = new Set<JsonRpcId>();
 	const pendingPermissionRequests = new Map<string, { resolve: (result: RequestPermissionResult) => void }>();
+	const messageIds = new WeakMap<AgentMessage, string>();
+	const foregroundPromptIds = new Set<JsonRpcId>();
 
 	const output = (obj: unknown) => {
 		writeRawStdout(serializeJsonLine(obj));
@@ -99,6 +116,32 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 
 	const sendError = (id: JsonRpcId | null, code: number, message: string, data?: unknown) => {
 		output(createErrorResponse(id, code, message, data));
+	};
+
+	const sendSessionUpdateV2 = (update: SessionUpdateV2) => {
+		const params: SessionNotificationParamsV2 = { sessionId: session.sessionId, update };
+		sendNotification("session/update", params);
+	};
+
+	const sendStateUpdateV2 = (
+		state: SessionUpdateStateV2["state"],
+		stopReason?: string,
+		error?: SessionUpdateStateV2["error"],
+	) => {
+		sendSessionUpdateV2({
+			sessionUpdate: "state_update",
+			state,
+			...(stopReason === undefined ? {} : { stopReason }),
+			...(error === undefined ? {} : { error }),
+		});
+	};
+
+	const sendNoticeV2 = (message: string, type?: "info" | "warning" | "error") => {
+		sendSessionUpdateV2({
+			sessionUpdate: "notice",
+			severity: type ?? "info",
+			title: message,
+		});
 	};
 
 	const sendPermissionRequest = (title: string, message: string): Promise<RequestPermissionResult> => {
@@ -152,7 +195,14 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 			message: string,
 		): Promise<boolean> => {
 			if (opts?.signal?.aborted) return false;
-			return isPermissionAllowed(await sendPermissionRequest(title, message));
+			if (protocolVersion === 2 && foregroundPromptIds.size > 0) {
+				sendStateUpdateV2("requires_action");
+			}
+			const result = await sendPermissionRequest(title, message);
+			if (protocolVersion === 2 && foregroundPromptIds.size > 0 && result.outcome.outcome !== "cancelled") {
+				sendStateUpdateV2("running");
+			}
+			return isPermissionAllowed(result);
 		};
 
 		return {
@@ -166,6 +216,10 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 			input: (): Promise<string | undefined> => Promise.resolve(undefined),
 
 			notify(message: string, type?: "info" | "warning" | "error"): void {
+				if (protocolVersion === 2) {
+					sendNoticeV2(message, type);
+					return;
+				}
 				process.stderr.write(`[acp ${type ?? "info"}] ${message}\n`);
 			},
 
@@ -254,6 +308,15 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 		session = nextSession;
 		unsubscribe = session.subscribe((event: AgentSessionEvent) => {
 			if (!initialized) return;
+			if (protocolVersion === 2) {
+				const notification = toSessionNotificationV2(session.sessionId, event, messageIds, () =>
+					crypto.randomUUID(),
+				);
+				if (notification) {
+					sendNotification("session/update", notification);
+				}
+				return;
+			}
 			const notification: SessionNotificationParams | null = toSessionNotification(session.sessionId, event);
 			if (notification) {
 				sendNotification("session/update", notification);
@@ -339,6 +402,69 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 		}
 	};
 
+	const handlePromptV2 = async (id: JsonRpcId, params: PromptParams): Promise<void> => {
+		if (params.sessionId !== session.sessionId) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, `Unknown sessionId: ${params.sessionId}`);
+			return;
+		}
+		const { text, images } = normalizePrompt(params.prompt);
+		const messageId = crypto.randomUUID();
+		let responded = false;
+		activePromptIds.add(id);
+		try {
+			await session.prompt(text, {
+				images,
+				source: "acp",
+				preflightResult: (success: boolean) => {
+					if (!success) {
+						if (!responded) {
+							responded = true;
+							sendError(id, ACP_JSON_RPC_ERRORS.internal, "Prompt rejected before insertion");
+						}
+						return;
+					}
+					if (!responded) {
+						responded = true;
+						const result: PromptResultV2 = { messageId };
+						sendResponse(id, result);
+					}
+					sendSessionUpdateV2({
+						sessionUpdate: "user_message",
+						messageId,
+						content: params.prompt,
+					});
+					foregroundPromptIds.add(id);
+					sendStateUpdateV2("running");
+				},
+			});
+			if (!responded) {
+				responded = true;
+				sendResponse(id, { messageId });
+			}
+			foregroundPromptIds.delete(id);
+			sendStateUpdateV2("idle", cancelledPromptIds.has(id) ? "cancelled" : "end_turn");
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			if (!responded) {
+				responded = true;
+				if (cancelledPromptIds.has(id)) {
+					sendError(id, ACP_JSON_RPC_ERRORS.requestCancelled, "Request cancelled");
+				} else {
+					sendError(id, ACP_JSON_RPC_ERRORS.internal, message);
+				}
+			}
+			foregroundPromptIds.delete(id);
+			sendStateUpdateV2(
+				"idle",
+				cancelledPromptIds.has(id) ? "cancelled" : "error",
+				cancelledPromptIds.has(id) ? undefined : { code: ACP_JSON_RPC_ERRORS.internal, message },
+			);
+		} finally {
+			activePromptIds.delete(id);
+			cancelledPromptIds.delete(id);
+		}
+	};
+
 	const handleNewSession = async (id: JsonRpcId, cwd: string): Promise<void> => {
 		if (resolvePath(cwd) !== resolvePath(runtimeHost.cwd)) {
 			sendError(
@@ -351,6 +477,10 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 		const result = await runtimeHost.newSession();
 		if (result.cancelled) {
 			sendError(id, ACP_JSON_RPC_ERRORS.unavailable, "Session creation was cancelled");
+			return;
+		}
+		if (protocolVersion === 2) {
+			sendResponse(id, { sessionId: session.sessionId });
 			return;
 		}
 		sendResponse(id, { sessionId: session.sessionId, modes: null, configOptions: null });
@@ -373,6 +503,148 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 		sendResponse(id, { modes: null, configOptions: null });
 	};
 
+	const toContentBlocks = (content: unknown): ContentBlock[] => {
+		if (typeof content === "string") {
+			return content.length > 0 ? [{ type: "text", text: content }] : [];
+		}
+		if (!Array.isArray(content)) return [];
+		const blocks: ContentBlock[] = [];
+		for (const part of content) {
+			if (!part || typeof part !== "object") continue;
+			const block = part as {
+				type?: unknown;
+				text?: unknown;
+				thinking?: unknown;
+				data?: unknown;
+				mimeType?: unknown;
+			};
+			if (block.type === "text" && typeof block.text === "string") {
+				blocks.push({ type: "text", text: block.text });
+				continue;
+			}
+			if (block.type === "thinking" && typeof block.thinking === "string") {
+				blocks.push({ type: "text", text: block.thinking });
+				continue;
+			}
+			if (block.type === "image" && typeof block.data === "string" && typeof block.mimeType === "string") {
+				blocks.push({ type: "image", data: block.data, mimeType: block.mimeType });
+			}
+		}
+		return blocks;
+	};
+
+	const buildReplayUpdates = (entries: SessionEntry[]): SessionUpdateV2[] => {
+		const updates: SessionUpdateV2[] = [];
+		for (const entry of entries) {
+			if (entry.type !== "message") continue;
+			const message = entry.message;
+			const messageId = entry.id;
+			if (message.role === "user") {
+				const content = toContentBlocks(message.content);
+				if (content.length > 0) {
+					updates.push({ sessionUpdate: "user_message", messageId, content });
+				}
+				continue;
+			}
+			if (message.role !== "assistant") continue;
+			const thought: ContentBlock[] = [];
+			const text: ContentBlock[] = [];
+			for (const part of message.content) {
+				if (part.type === "thinking") {
+					thought.push({ type: "text", text: part.thinking });
+					continue;
+				}
+				if (part.type === "text") {
+					text.push({ type: "text", text: part.text });
+				}
+			}
+			if (thought.length > 0) {
+				updates.push({ sessionUpdate: "agent_thought", messageId, content: thought });
+			}
+			if (text.length > 0) {
+				updates.push({ sessionUpdate: "agent_message", messageId, content: text });
+			}
+		}
+		return updates;
+	};
+
+	const handleSessionList = async (id: JsonRpcId, params: SessionListParams): Promise<void> => {
+		if (params.cursor !== undefined) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, "cursor pagination is not supported");
+			return;
+		}
+		const sessions =
+			params.cwd === undefined ? await SessionManager.listAll() : await SessionManager.list(params.cwd);
+		const result: SessionListResult = {
+			sessions: sessions.map((session) => ({
+				sessionId: session.id,
+				cwd: session.cwd,
+				...(session.name === undefined ? {} : { title: session.name }),
+				...(session.name === undefined && session.firstMessage ? { title: session.firstMessage } : {}),
+				updatedAt: session.modified.toISOString(),
+				_meta: { messageCount: session.messageCount },
+			})),
+		};
+		sendResponse(id, result);
+	};
+
+	const handleResume = async (id: JsonRpcId, params: ResumeParams): Promise<void> => {
+		if (hasUnsupportedMcpServers(params)) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, "MCP servers are not supported in ACP mode");
+			return;
+		}
+		if (params.additionalDirectories && params.additionalDirectories.length > 0) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, "additionalDirectories are not supported in ACP mode");
+			return;
+		}
+		if (params.replayFrom !== undefined && params.replayFrom !== null && params.replayFrom.type !== "start") {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, `Unsupported replayFrom type: ${params.replayFrom.type}`);
+			return;
+		}
+		let info = (await SessionManager.list(params.cwd)).find((candidate) => candidate.id === params.sessionId);
+		if (!info) {
+			info = (await SessionManager.listAll()).find((candidate) => candidate.id === params.sessionId);
+		}
+		if (!info) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, `Session not found: ${params.sessionId}`);
+			return;
+		}
+		if (info.cwd && resolvePath(info.cwd) !== resolvePath(params.cwd)) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, `Session cwd does not match: ${info.cwd}`);
+			return;
+		}
+		await runtimeHost.switchSession(info.path, { cwdOverride: params.cwd });
+		if (params.replayFrom?.type === "start") {
+			const entries = loadEntriesFromFile(info.path).filter(
+				(entry): entry is SessionEntry => entry.type !== "session",
+			);
+			for (const update of buildReplayUpdates(entries)) {
+				sendSessionUpdateV2(update);
+			}
+		}
+		sendStateUpdateV2("idle");
+		sendResponse(id, {});
+	};
+
+	const handleCloseSession = async (id: JsonRpcId, sessionId: string): Promise<void> => {
+		if (sessionId !== session.sessionId) {
+			sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, `Unknown sessionId: ${sessionId}`);
+			return;
+		}
+		const wasForegroundActive = foregroundPromptIds.size > 0;
+		for (const promptId of activePromptIds) {
+			cancelledPromptIds.add(promptId);
+		}
+		for (const requestId of [...pendingPermissionRequests.keys()]) {
+			cancelPermissionRequest(requestId);
+		}
+		await session.abort();
+		if (wasForegroundActive) {
+			sendStateUpdateV2("idle", "cancelled");
+		}
+		sendResponse(id, {});
+	};
+
 	const handleRequest = async (request: JsonRpcRequest): Promise<void> => {
 		const id = request.id;
 		const isRequest = id !== undefined;
@@ -387,7 +659,7 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 
 		switch (request.method) {
 			case "initialize": {
-				const validation = validateInitializeParams(params);
+				const validation = parseInitializeParams(params);
 				if (!validation.ok) {
 					if (isRequest) {
 						sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, validation.message);
@@ -395,34 +667,52 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 					return;
 				}
 				initialized = true;
-				if (isRequest) {
-					sendResponse(id, {
-						agentCapabilities: {
-							loadSession: true,
-							promptCapabilities: {
-								image: true,
-								audio: false,
-								embeddedContext: false,
+				protocolVersion = negotiateProtocolVersion(validation.requestedVersion);
+				if (!isRequest) return;
+				if (protocolVersion === 2) {
+					const result: InitializeResultV2 = {
+						protocolVersion: 2,
+						info: { name: "Step Code", version: VERSION },
+						capabilities: {
+							session: {
+								prompt: { image: {} },
 							},
-							mcpCapabilities: {
-								http: false,
-								sse: false,
-							},
-							sessionCapabilities: {},
-						},
-						agentInfo: {
-							name: "Step Code",
-							version: VERSION,
 						},
 						authMethods: [],
-						protocolVersion: ACP_PROTOCOL_VERSION,
-					});
+					};
+					sendResponse(id, result);
+					return;
 				}
+				sendResponse(id, {
+					agentCapabilities: {
+						loadSession: true,
+						promptCapabilities: {
+							image: true,
+							audio: false,
+							embeddedContext: false,
+						},
+						mcpCapabilities: {
+							http: false,
+							sse: false,
+						},
+						sessionCapabilities: {},
+					},
+					agentInfo: {
+						name: "Step Code",
+						version: VERSION,
+					},
+					authMethods: [],
+					protocolVersion: ACP_PROTOCOL_VERSION,
+				});
 				return;
 			}
 
 			case "session/new": {
 				if (!isRequest) return;
+				if (protocolVersion === 2 && hasUnsupportedMcpServers(params)) {
+					sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, "MCP servers are not supported in ACP mode");
+					return;
+				}
 				const validation = validateNewSessionParams(params);
 				if (!validation.ok) {
 					sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, validation.message);
@@ -433,6 +723,16 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 			}
 
 			case "session/load": {
+				if (protocolVersion === 2) {
+					if (isRequest) {
+						sendError(
+							id,
+							ACP_JSON_RPC_ERRORS.methodNotFound,
+							"session/load was removed in ACP v2; use session/resume",
+						);
+					}
+					return;
+				}
 				if (!isRequest) return;
 				const validation = validateLoadSessionParams(params);
 				if (!validation.ok) {
@@ -440,6 +740,57 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 					return;
 				}
 				await handleLoadSession(id, { sessionId: validation.sessionId, cwd: validation.cwd });
+				return;
+			}
+
+			case "session/resume": {
+				if (protocolVersion !== 2) {
+					if (isRequest) {
+						sendError(id, ACP_JSON_RPC_ERRORS.methodNotFound, "session/resume requires ACP v2");
+					}
+					return;
+				}
+				if (!isRequest) return;
+				const validation = validateResumeParams(params);
+				if (!validation.ok) {
+					sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, validation.message);
+					return;
+				}
+				await handleResume(id, validation.value);
+				return;
+			}
+
+			case "session/list": {
+				if (protocolVersion !== 2) {
+					if (isRequest) {
+						sendError(id, ACP_JSON_RPC_ERRORS.methodNotFound, "session/list requires ACP v2");
+					}
+					return;
+				}
+				if (!isRequest) return;
+				const validation = validateSessionListParams(params);
+				if (!validation.ok) {
+					sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, validation.message);
+					return;
+				}
+				await handleSessionList(id, validation.value);
+				return;
+			}
+
+			case "session/close": {
+				if (protocolVersion !== 2) {
+					if (isRequest) {
+						sendError(id, ACP_JSON_RPC_ERRORS.methodNotFound, "session/close requires ACP v2");
+					}
+					return;
+				}
+				if (!isRequest) return;
+				const validation = validateCloseSessionParams(params);
+				if (!validation.ok) {
+					sendError(id, ACP_JSON_RPC_ERRORS.invalidParams, validation.message);
+					return;
+				}
+				await handleCloseSession(id, validation.value.sessionId);
 				return;
 			}
 
@@ -452,7 +803,7 @@ export async function runAcpMode(runtimeHost: AgentSessionRuntimeHost): Promise<
 				}
 				// Do not await the turn here: stdin must stay readable so
 				// session/cancel and session/request_permission responses arrive.
-				void handlePrompt(id, validation.value);
+				void (protocolVersion === 2 ? handlePromptV2(id, validation.value) : handlePrompt(id, validation.value));
 				return;
 			}
 

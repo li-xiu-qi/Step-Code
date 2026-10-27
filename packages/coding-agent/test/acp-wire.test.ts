@@ -1,15 +1,21 @@
 import { describe, expect, test } from "vitest";
 import type { AgentSessionEvent } from "../src/core/agent-session.ts";
 import {
+	hasUnsupportedMcpServers,
 	mapAssistantEventToSessionUpdate,
+	negotiateProtocolVersion,
 	normalizePrompt,
+	parseInitializeParams,
 	parseJsonRpcLine,
 	parseRequestPermissionResult,
 	toSessionNotification,
+	validateCloseSessionParams,
 	validateInitializeParams,
 	validateLoadSessionParams,
 	validateNewSessionParams,
 	validatePromptParams,
+	validateResumeParams,
+	validateSessionListParams,
 } from "../src/modes/acp/acp-wire.ts";
 
 describe("acp wire parsing", () => {
@@ -64,6 +70,34 @@ describe("acp parameter validation", () => {
 		});
 		expect(valid.ok).toBe(true);
 		expect(validatePromptParams({ sessionId: "s1", prompt: [{ type: "audio" }] }).ok).toBe(false);
+	});
+
+	test("negotiates v2 only when the client sends v2 info", () => {
+		expect(parseInitializeParams({ protocolVersion: 1 }).ok).toBe(true);
+		expect(parseInitializeParams({ protocolVersion: 2 }).ok).toBe(false);
+		expect(parseInitializeParams({ protocolVersion: 2, info: { name: "zed", version: "1" } }).ok).toBe(true);
+		expect(negotiateProtocolVersion(1)).toBe(1);
+		expect(negotiateProtocolVersion(2)).toBe(2);
+		expect(negotiateProtocolVersion(3)).toBe(2);
+	});
+
+	test("validates v2 session lifecycle params", () => {
+		expect(validateResumeParams({ sessionId: "s1", cwd: "/repo", replayFrom: { type: "start" } }).ok).toBe(true);
+		expect(validateResumeParams({ sessionId: "s1", cwd: "repo" }).ok).toBe(false);
+		expect(validateResumeParams({ sessionId: "s1", cwd: "/repo", replayFrom: { type: "later" } }).ok).toBe(true);
+		expect(validateResumeParams({ sessionId: "s1", cwd: "/repo", replayFrom: {} }).ok).toBe(false);
+		expect(validateCloseSessionParams({ sessionId: "s1" }).ok).toBe(true);
+		expect(validateCloseSessionParams({}).ok).toBe(false);
+		expect(validateSessionListParams(undefined).ok).toBe(true);
+		expect(validateSessionListParams({ cwd: "/repo" }).ok).toBe(true);
+		expect(validateSessionListParams({ cwd: "repo" }).ok).toBe(false);
+		expect(validateSessionListParams({ cursor: 1 }).ok).toBe(false);
+	});
+
+	test("detects non-empty MCP server lists", () => {
+		expect(hasUnsupportedMcpServers({ mcpServers: [] })).toBe(false);
+		expect(hasUnsupportedMcpServers({ mcpServers: [{ name: "x" }] })).toBe(true);
+		expect(hasUnsupportedMcpServers({})).toBe(false);
 	});
 });
 

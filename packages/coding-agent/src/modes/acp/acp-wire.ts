@@ -1,7 +1,10 @@
 import { isAbsolute } from "node:path";
+import type { AgentMessage } from "@step-harness/agent-core";
 import type { ImageContent } from "@step-harness/providers";
 import type { AgentSessionEvent } from "../../core/agent-session.ts";
 import type {
+	AcpProtocolVersion,
+	CloseSessionParams,
 	ContentBlock,
 	JsonRpcError,
 	JsonRpcId,
@@ -10,8 +13,12 @@ import type {
 	JsonRpcResponseObject,
 	PromptParams,
 	RequestPermissionResult,
+	ResumeParams,
+	SessionListParams,
 	SessionNotificationParams,
+	SessionNotificationParamsV2,
 	SessionUpdate,
+	SessionUpdateV2,
 } from "./acp-types.ts";
 import { ACP_JSON_RPC_ERRORS } from "./acp-types.ts";
 
@@ -97,6 +104,35 @@ export function validateInitializeParams(params: unknown): { ok: true } | { ok: 
 	return { ok: true };
 }
 
+/**
+ * Parse initialize for dual-version negotiation.
+ *
+ * v1 keeps the historical shape. v2 requires `info`; capabilities stay optional
+ * so a minimal client can still negotiate the stable baseline.
+ */
+export function parseInitializeParams(
+	params: unknown,
+): { ok: true; requestedVersion: number } | { ok: false; message: string } {
+	if (!isRecord(params)) {
+		return { ok: false, message: "Initialize params must be an object" };
+	}
+	if (typeof params.protocolVersion !== "number" || !Number.isInteger(params.protocolVersion)) {
+		return { ok: false, message: "protocolVersion must be an integer" };
+	}
+	const requestedVersion = params.protocolVersion;
+	if (requestedVersion >= 2) {
+		const info = params.info;
+		if (!isRecord(info) || typeof info.name !== "string" || typeof info.version !== "string") {
+			return { ok: false, message: "v2 initialize requires info.name and info.version" };
+		}
+	}
+	return { ok: true, requestedVersion };
+}
+
+export function negotiateProtocolVersion(requestedVersion: number): AcpProtocolVersion {
+	return requestedVersion >= 2 ? 2 : 1;
+}
+
 export function validateNewSessionParams(params: unknown): { ok: true; cwd: string } | { ok: false; message: string } {
 	if (!isRecord(params)) {
 		return { ok: false, message: "Session params must be an object" };
@@ -126,6 +162,92 @@ export function validateLoadSessionParams(
 		return { ok: false, message: "cwd must be an absolute path" };
 	}
 	return { ok: true, sessionId: params.sessionId, cwd: params.cwd };
+}
+
+export function validateResumeParams(
+	params: unknown,
+): { ok: true; value: ResumeParams } | { ok: false; message: string } {
+	if (!isRecord(params)) {
+		return { ok: false, message: "Resume params must be an object" };
+	}
+	if (typeof params.sessionId !== "string" || !params.sessionId) {
+		return { ok: false, message: "sessionId is required" };
+	}
+	if (typeof params.cwd !== "string" || !params.cwd) {
+		return { ok: false, message: "cwd is required" };
+	}
+	if (!isAbsolute(params.cwd)) {
+		return { ok: false, message: "cwd must be an absolute path" };
+	}
+	if (params.mcpServers !== undefined && !Array.isArray(params.mcpServers)) {
+		return { ok: false, message: "mcpServers must be an array" };
+	}
+	if (params.replayFrom !== undefined && params.replayFrom !== null) {
+		if (!isRecord(params.replayFrom) || typeof params.replayFrom.type !== "string") {
+			return { ok: false, message: "replayFrom must be an object with a type string" };
+		}
+	}
+	if (params.additionalDirectories !== undefined) {
+		if (
+			!Array.isArray(params.additionalDirectories) ||
+			params.additionalDirectories.some((entry) => typeof entry !== "string")
+		) {
+			return { ok: false, message: "additionalDirectories must be an array of strings" };
+		}
+	}
+	return {
+		ok: true,
+		value: {
+			sessionId: params.sessionId,
+			cwd: params.cwd,
+			...(params.mcpServers === undefined ? {} : { mcpServers: params.mcpServers }),
+			...(params.replayFrom === undefined ? {} : { replayFrom: params.replayFrom as { type: string } | null }),
+			...(params.additionalDirectories === undefined
+				? {}
+				: { additionalDirectories: params.additionalDirectories as string[] }),
+		},
+	};
+}
+
+export function validateCloseSessionParams(
+	params: unknown,
+): { ok: true; value: CloseSessionParams } | { ok: false; message: string } {
+	if (!isRecord(params)) {
+		return { ok: false, message: "Close params must be an object" };
+	}
+	if (typeof params.sessionId !== "string" || !params.sessionId) {
+		return { ok: false, message: "sessionId is required" };
+	}
+	return { ok: true, value: { sessionId: params.sessionId } };
+}
+
+export function validateSessionListParams(
+	params: unknown,
+): { ok: true; value: SessionListParams } | { ok: false; message: string } {
+	if (params === undefined) {
+		return { ok: true, value: {} };
+	}
+	if (!isRecord(params)) {
+		return { ok: false, message: "Session list params must be an object" };
+	}
+	if (params.cwd !== undefined && (typeof params.cwd !== "string" || !isAbsolute(params.cwd))) {
+		return { ok: false, message: "cwd must be an absolute path" };
+	}
+	if (params.cursor !== undefined && typeof params.cursor !== "string") {
+		return { ok: false, message: "cursor must be a string" };
+	}
+	return {
+		ok: true,
+		value: {
+			...(params.cwd === undefined ? {} : { cwd: params.cwd as string }),
+			...(params.cursor === undefined ? {} : { cursor: params.cursor as string }),
+		},
+	};
+}
+
+/** Non-empty MCP server lists are rejected until ACP MCP passthrough lands. */
+export function hasUnsupportedMcpServers(params: unknown): boolean {
+	return isRecord(params) && Array.isArray(params.mcpServers) && params.mcpServers.length > 0;
 }
 
 export function validatePromptParams(
@@ -237,6 +359,87 @@ export function mapAssistantEventToSessionUpdate(event: AgentSessionEvent): Sess
 
 export function toSessionNotification(sessionId: string, event: AgentSessionEvent): SessionNotificationParams | null {
 	const update = mapAssistantEventToSessionUpdate(event);
+	if (!update) return null;
+	return { sessionId, update };
+}
+
+function ensureMessageId(
+	message: AgentMessage,
+	messageIds: WeakMap<AgentMessage, string>,
+	createId: () => string,
+): string {
+	const existing = messageIds.get(message);
+	if (existing) return existing;
+	const id = createId();
+	messageIds.set(message, id);
+	return id;
+}
+
+export function mapSessionEventToSessionUpdateV2(
+	event: AgentSessionEvent,
+	messageIds: WeakMap<AgentMessage, string>,
+	createId: () => string,
+): SessionUpdateV2 | null {
+	if (event.type === "message_update") {
+		const message = event.message;
+		if (message.role !== "assistant") return null;
+		const messageId = ensureMessageId(message, messageIds, createId);
+		const assistantEvent = event.assistantMessageEvent;
+		if (assistantEvent.type === "text_delta" && assistantEvent.delta.length > 0) {
+			return {
+				sessionUpdate: "agent_message_chunk",
+				messageId,
+				content: { type: "text", text: assistantEvent.delta },
+			};
+		}
+		if (assistantEvent.type === "thinking_delta" && assistantEvent.delta.length > 0) {
+			return {
+				sessionUpdate: "agent_thought_chunk",
+				messageId,
+				content: { type: "text", text: assistantEvent.delta },
+			};
+		}
+		return null;
+	}
+	if (event.type === "tool_execution_start") {
+		return {
+			sessionUpdate: "tool_call_update",
+			toolCallId: event.toolCallId,
+			title: buildToolTitle(event.toolName, event.args),
+			name: event.toolName,
+			kind: mapToolKind(event.toolName),
+			status: "pending",
+			content: [],
+			rawInput: sanitizeToolInput(event.args),
+		};
+	}
+	if (event.type === "tool_execution_update") {
+		return {
+			sessionUpdate: "tool_call_update",
+			toolCallId: event.toolCallId,
+			status: "in_progress",
+			rawOutput: sanitizeToolInput(event.partialResult),
+		};
+	}
+	if (event.type === "tool_execution_end") {
+		const update: SessionUpdateV2 = {
+			sessionUpdate: "tool_call_update",
+			toolCallId: event.toolCallId,
+			status: event.isError ? "failed" : "completed",
+			rawOutput: stringifyToolOutput(event.result),
+		};
+		return update;
+	}
+	return null;
+}
+
+export function toSessionNotificationV2(
+	sessionId: string,
+	event: AgentSessionEvent,
+	messageIds: WeakMap<AgentMessage, string>,
+	createId: () => string,
+): SessionNotificationParamsV2 | null {
+	const update = mapSessionEventToSessionUpdateV2(event, messageIds, createId);
 	if (!update) return null;
 	return { sessionId, update };
 }
