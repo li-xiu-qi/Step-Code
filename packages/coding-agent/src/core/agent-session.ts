@@ -126,6 +126,7 @@ import type { SettingsManager } from "./settings-manager.ts";
 import type { SlashCommandInfo } from "./slash-commands.ts";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.ts";
 import { type BuildSystemPromptOptions, buildSystemPrompt, type SystemPromptProduct } from "./system-prompt.ts";
+import { isMarkedCoreToolDefinition } from "./tool-origin.ts";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.ts";
 import { createAllToolDefinitions } from "./tools/index.ts";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.ts";
@@ -576,6 +577,7 @@ export class AgentSession {
 					type: "tool_call",
 					toolName: toolCall.name,
 					toolCallId: toolCall.id,
+					origin: this._toolDefinitions.get(toolCall.name)?.definition.origin,
 					input: args as Record<string, unknown>,
 				});
 			} catch (err) {
@@ -1520,6 +1522,7 @@ export class AgentSession {
 				description: definition.description,
 				parameters: definition.parameters,
 				promptGuidelines: definition.promptGuidelines,
+				origin: definition.origin,
 				sourceInfo,
 			}));
 	}
@@ -3432,7 +3435,10 @@ export class AgentSession {
 		const allCustomTools = [
 			...registeredTools,
 			...this._customTools.map((definition) => ({
-				definition,
+				definition: {
+					...definition,
+					origin: isMarkedCoreToolDefinition(definition) ? ("core" as const) : ("extension" as const),
+				},
 				sourceInfo: createSyntheticSourceInfo(`<sdk:${definition.name}>`, { source: "sdk" }),
 			})),
 		].filter((tool) => isAllowedTool(tool.definition.name));
@@ -3442,7 +3448,7 @@ export class AgentSession {
 				.map(([name, definition]) => [
 					name,
 					{
-						definition,
+						definition: { ...definition, origin: definition.origin ?? "core" },
 						sourceInfo: createSyntheticSourceInfo(`<builtin:${name}>`, { source: "builtin" }),
 					},
 				]),
